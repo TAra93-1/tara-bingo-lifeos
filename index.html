@@ -253,6 +253,7 @@
         .btn:active { transform: scale(0.98); }
         .btn:disabled { background: #ccc; cursor: not-allowed; opacity: 0.7; }
         .btn-sec { background: transparent; border: 1px solid var(--text); color: var(--text); }
+        .btn-sec.active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
         .btn-danger { background: rgba(198, 40, 40, 0.1); color: #c62828; border: 1px solid #c62828; }
         .input-group { margin-bottom: 15px; } 
         .input-group label { color: var(--text); font-size: 0.8rem; font-weight: bold; margin-bottom: 5px; display: block; opacity: 0.8; }
@@ -1263,7 +1264,7 @@
     <!-- 侧边栏 -->
     <div id="sidebar">
         <div class="sidebar-header">
-            <h2>Vesper 控制台</h2>
+            <h2> 控制台</h2>
             <span class="sidebar-close" onclick="closeSidebar()">×</span>
         </div>
         <div class="sidebar-content">
@@ -3137,6 +3138,7 @@ ${gridText}`;
             const cooldown = character.settings.bgCooldown || 2;
             document.getElementById('character-detail-bg-cooldown').value = cooldown < 60 ? cooldown * 60 : cooldown;
             document.getElementById('character-max-memory').value = character.settings.maxMemory || 20;
+            document.getElementById('character-worldbook-scan-depth').value = character.settings.worldBookScanDepth || 10;
             document.getElementById('character-detail-pinned-memory').value = character.settings.pinnedMemory || 0;
             document.getElementById('character-detail-auto-summary').checked = character.settings.autoSummary || false;
             document.getElementById('character-detail-summary-interval').value = character.settings.summaryInterval || 10;
@@ -3359,6 +3361,7 @@ ${gridText}`;
             currentEditingCharacter.settings.bgActivity = document.getElementById('character-detail-bg-activity').checked;
             currentEditingCharacter.settings.bgCooldown = parseInt(document.getElementById('character-detail-bg-cooldown').value) || 120;
             currentEditingCharacter.settings.maxMemory = parseInt(document.getElementById('character-max-memory').value) || 20;
+            currentEditingCharacter.settings.worldBookScanDepth = parseInt(document.getElementById('character-worldbook-scan-depth').value) || 10;
             currentEditingCharacter.settings.pinnedMemory = parseInt(document.getElementById('character-detail-pinned-memory').value) || 0;
             currentEditingCharacter.settings.autoSummary = document.getElementById('character-detail-auto-summary').checked;
             currentEditingCharacter.settings.summaryInterval = parseInt(document.getElementById('character-detail-summary-interval').value) || 10;
@@ -4321,22 +4324,34 @@ ${gridText}`;
                     ? store.apiConfig.main.url + 'chat/completions'
                     : store.apiConfig.main.url + '/chat/completions';
 
+                // 构建请求参数（根据开关状态动态添加温度和Top-P）
+                const requestBody = {
+                    model: store.apiConfig.main.model,
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        ...messages,
+                        // [Vesper Fix] 动态时间注入 - 每次发送时强制更新当前时间
+                        { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。请根据此时间判断 User 的作息状态和时段语境。` }
+                    ]
+                };
+
+                // 根据开关状态添加温度参数
+                if (store.apiConfig.main.temperatureEnabled !== false) {
+                    requestBody.temperature = currentChatCharacter.settings.temperature || store.apiConfig.main.temperature || 0.8;
+                }
+
+                // 根据开关状态添加Top-P参数
+                if (store.apiConfig.main.topPEnabled === true) {
+                    requestBody.top_p = store.apiConfig.main.topP || 1;
+                }
+
                 const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${store.apiConfig.main.key}`
                     },
-                    body: JSON.stringify({
-                        model: store.apiConfig.main.model,
-                        messages: [
-                            { role: 'system', content: systemPrompt },
-                            ...messages,
-                            // [Vesper Fix] 动态时间注入 - 每次发送时强制更新当前时间
-                            { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。请根据此时间判断 User 的作息状态和时段语境。` }
-                        ],
-                        temperature: currentChatCharacter.settings.temperature || 0.8
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if(!response.ok) {
@@ -4518,18 +4533,54 @@ ${gridText}`;
             if(currentChatCharacter.scenario) prompt += `## 当前场景\n${currentChatCharacter.scenario}\n\n`;
             if(currentChatCharacter.mes_example) prompt += `## 对话示例\n${currentChatCharacter.mes_example}\n\n`;
 
-            // 2. 世界书内容注入
+            // 2. 世界书内容注入（支持蓝灯常驻/绿灯关键词触发）
             if(currentChatCharacter.settings.linkedWorldBookIds && currentChatCharacter.settings.linkedWorldBookIds.length > 0) {
-                prompt += `# 世界观设定 (必须严格遵守)\n\n`;
+                // 获取最近对话作为关键词扫描上下文
+                const scanDepth = currentChatCharacter.settings.worldBookScanDepth || 10; // 默认扫描最近10条消息
+                const recentMessages = currentChatCharacter.chatHistory.slice(-scanDepth);
+                const contextText = recentMessages.map(m => m.content).join(' ').toLowerCase();
+
+                let worldBookContent = '';
+                let activatedCount = 0;
+
                 for(const wbId of currentChatCharacter.settings.linkedWorldBookIds) {
                     const wb = await db.worldBooks.get(wbId);
                     if(wb && wb.entries && wb.entries.length > 0) {
-                        prompt += `## ${wb.name}\n`;
+                        let bookContent = '';
+
                         wb.entries.filter(entry => entry.enabled).forEach(entry => {
-                            prompt += `\n### ${entry.name}\n关键词: ${entry.keys.join(', ')}\n${entry.content}\n`;
+                            const triggerMode = entry.triggerMode || 'keyword';
+                            let shouldActivate = false;
+
+                            if (triggerMode === 'always') {
+                                // 蓝灯常驻：始终激活
+                                shouldActivate = true;
+                            } else {
+                                // 绿灯关键词触发：检查关键词是否出现在上下文中
+                                if (entry.keys && entry.keys.length > 0) {
+                                    shouldActivate = entry.keys.some(key => {
+                                        const keyLower = key.toLowerCase().trim();
+                                        return keyLower && contextText.includes(keyLower);
+                                    });
+                                }
+                            }
+
+                            if (shouldActivate) {
+                                bookContent += `\n### ${entry.name}\n${entry.content}\n`;
+                                activatedCount++;
+                            }
                         });
-                        prompt += `\n`;
+
+                        if (bookContent) {
+                            worldBookContent += `## ${wb.name}\n${bookContent}\n`;
+                        }
                     }
+                }
+
+                if (worldBookContent) {
+                    prompt += `# 世界观设定 (必须严格遵守)\n\n`;
+                    prompt += worldBookContent;
+                    console.log(`[世界书] 已激活 ${activatedCount} 个条目`);
                 }
             }
 
@@ -5082,6 +5133,15 @@ ${gridText}`;
                 document.getElementById('main-api-model').value = store.apiConfig.main.model || 'gpt-4';
                 document.getElementById('main-api-temp').value = store.apiConfig.main.temperature || 0.8;
 
+                // 加载温度和Top-P的启用状态
+                const tempEnabled = store.apiConfig.main.temperatureEnabled !== false; // 默认启用
+                const toppEnabled = store.apiConfig.main.topPEnabled === true; // 默认禁用
+                document.getElementById('main-api-temp-enabled').checked = tempEnabled;
+                document.getElementById('main-api-temp').disabled = !tempEnabled;
+                document.getElementById('main-api-topp-enabled').checked = toppEnabled;
+                document.getElementById('main-api-topp').disabled = !toppEnabled;
+                document.getElementById('main-api-topp').value = store.apiConfig.main.topP || 1;
+
                 document.getElementById('sub-api-url').value = store.apiConfig.sub.url || '';
                 document.getElementById('sub-api-key').value = store.apiConfig.sub.key || '';
                 document.getElementById('sub-api-model').value = store.apiConfig.sub.model || 'gpt-3.5-turbo';
@@ -5102,13 +5162,27 @@ ${gridText}`;
             refreshApiPresetSelect();
         }
 
+        // 切换API参数启用状态
+        function toggleApiParam(param) {
+            if (param === 'temp') {
+                const enabled = document.getElementById('main-api-temp-enabled').checked;
+                document.getElementById('main-api-temp').disabled = !enabled;
+            } else if (param === 'topp') {
+                const enabled = document.getElementById('main-api-topp-enabled').checked;
+                document.getElementById('main-api-topp').disabled = !enabled;
+            }
+        }
+
         function saveApiConfig() {
             if (!store.apiConfig) store.apiConfig = {};
             store.apiConfig.main = {
                 url: document.getElementById('main-api-url').value,
                 key: document.getElementById('main-api-key').value,
                 model: document.getElementById('main-api-model').value,
-                temperature: parseFloat(document.getElementById('main-api-temp').value)
+                temperature: parseFloat(document.getElementById('main-api-temp').value),
+                temperatureEnabled: document.getElementById('main-api-temp-enabled').checked,
+                topP: parseFloat(document.getElementById('main-api-topp').value),
+                topPEnabled: document.getElementById('main-api-topp-enabled').checked
             };
             store.apiConfig.sub = {
                 url: document.getElementById('sub-api-url').value,
@@ -6411,12 +6485,20 @@ ${gridText}`;
                 const statusColor = entry.enabled ? 'var(--completed)' : '#999';
                 const statusText = entry.enabled ? '已启用' : '已禁用';
 
+                // 触发模式指示灯
+                const triggerMode = entry.triggerMode || 'keyword';
+                const lightColor = triggerMode === 'always' ? '#2196F3' : '#4CAF50'; // 蓝色常驻 / 绿色关键词
+                const lightTitle = triggerMode === 'always' ? '常驻触发' : '关键词触发';
+
                 listDiv.innerHTML += `
                     <div class="mini-card" onclick="editWorldBookEntry(${index})" style="cursor:pointer; opacity:${entry.enabled ? '1' : '0.6'};">
                         <div style="flex:1;">
-                            <div style="font-weight:bold; margin-bottom:3px;">${entry.name}</div>
+                            <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
+                                <span style="width:10px; height:10px; border-radius:50%; background:${lightColor}; display:inline-block; box-shadow:0 0 4px ${lightColor};" title="${lightTitle}"></span>
+                                <span style="font-weight:bold;">${entry.name}</span>
+                            </div>
                             <div style="font-size:0.7rem; opacity:0.7;">
-                                关键词: ${entry.keys.join(', ')}
+                                ${triggerMode === 'always' ? '常驻' : '关键词: ' + (entry.keys.join(', ') || '无')}
                             </div>
                             <div style="font-size:0.65rem; color:${statusColor}; margin-top:3px;">
                                 ${statusText}
@@ -6444,6 +6526,8 @@ ${gridText}`;
             document.getElementById('entry-keys').value = '';
             document.getElementById('entry-content').value = '';
             document.getElementById('entry-enabled').checked = true;
+            document.getElementById('entry-trigger-mode').value = 'keyword'; // 默认绿灯关键词模式
+            updateTriggerModeUI('keyword');
 
             document.getElementById('modal-edit-entry').classList.add('active');
         }
@@ -6460,7 +6544,38 @@ ${gridText}`;
             document.getElementById('entry-content').value = entry.content;
             document.getElementById('entry-enabled').checked = entry.enabled;
 
+            // 设置触发模式（兼容旧数据，默认为 keyword）
+            const triggerMode = entry.triggerMode || 'keyword';
+            document.getElementById('entry-trigger-mode').value = triggerMode;
+            updateTriggerModeUI(triggerMode);
+
             document.getElementById('modal-edit-entry').classList.add('active');
+        }
+
+        // 更新触发模式UI显示
+        function updateTriggerModeUI(mode) {
+            const alwaysBtn = document.getElementById('trigger-always-btn');
+            const keywordBtn = document.getElementById('trigger-keyword-btn');
+            const keysInput = document.getElementById('entry-keys');
+            const keysHint = document.getElementById('entry-keys-hint');
+
+            if (mode === 'always') {
+                alwaysBtn.classList.add('active');
+                keywordBtn.classList.remove('active');
+                keysInput.placeholder = '可选，仅用于显示';
+                keysHint.textContent = '蓝灯常驻模式：条目将始终发送给AI';
+            } else {
+                alwaysBtn.classList.remove('active');
+                keywordBtn.classList.add('active');
+                keysInput.placeholder = '例如：王国,艾尔登,首都';
+                keysHint.textContent = '绿灯关键词模式：当对话中出现这些关键词时，该条目才会被激活';
+            }
+        }
+
+        // 切换触发模式
+        function setTriggerMode(mode) {
+            document.getElementById('entry-trigger-mode').value = mode;
+            updateTriggerModeUI(mode);
         }
 
         // 保存条目
@@ -6470,13 +6585,16 @@ ${gridText}`;
             const content = document.getElementById('entry-content').value.trim();
             const enabled = document.getElementById('entry-enabled').checked;
 
+            const triggerMode = document.getElementById('entry-trigger-mode').value;
+
             if(!name) {
                 alert('请输入条目名称!');
                 return;
             }
 
-            if(!keysText) {
-                alert('请输入至少一个关键词!');
+            // 绿灯模式必须填写关键词
+            if(triggerMode === 'keyword' && !keysText) {
+                alert('关键词触发模式必须输入至少一个关键词!');
                 return;
             }
 
@@ -6492,7 +6610,8 @@ ${gridText}`;
                 name: name,
                 keys: keys,
                 content: content,
-                enabled: enabled
+                enabled: enabled,
+                triggerMode: triggerMode // 'always' = 蓝灯常驻, 'keyword' = 绿灯关键词触发
             };
 
             try {
@@ -6965,17 +7084,29 @@ ${bingoContext}
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时
 
+                // 构建请求参数（根据开关状态动态添加温度和Top-P）
+                const requestBody = {
+                    model: config.model,
+                    messages: messages
+                };
+
+                // 根据开关状态添加温度参数
+                if (config.temperatureEnabled !== false) {
+                    requestBody.temperature = config.temperature || 0.8;
+                }
+
+                // 根据开关状态添加Top-P参数
+                if (config.topPEnabled === true) {
+                    requestBody.top_p = config.topP || 1;
+                }
+
                 const res = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${config.key}`
                     },
-                    body: JSON.stringify({
-                        model: config.model,
-                        messages: messages,
-                        temperature: config.temperature
-                    }),
+                    body: JSON.stringify(requestBody),
                     signal: controller.signal
                 });
 
@@ -11270,8 +11401,21 @@ ${taskList}
                 </select>
             </div>
             <div class="input-group">
-                <label>温度 (0-2)</label>
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <label style="margin:0; flex:1;">温度 (0-2)</label>
+                    <input type="checkbox" id="main-api-temp-enabled" checked style="width:auto;" onchange="toggleApiParam('temp')">
+                    <span style="font-size:0.7rem; opacity:0.7;">启用</span>
+                </div>
                 <input type="number" id="main-api-temp" min="0" max="2" step="0.1" value="0.8">
+            </div>
+            <div class="input-group">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <label style="margin:0; flex:1;">Top-P (0-1)</label>
+                    <input type="checkbox" id="main-api-topp-enabled" style="width:auto;" onchange="toggleApiParam('topp')">
+                    <span style="font-size:0.7rem; opacity:0.7;">启用</span>
+                </div>
+                <input type="number" id="main-api-topp" min="0" max="1" step="0.05" value="1" disabled>
+                <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">某些模型可能不支持同时使用温度和Top-P</div>
             </div>
 
             <hr style="margin:20px 0; opacity:0.3;">
@@ -11497,6 +11641,13 @@ ${taskList}
                         <input type="number" id="character-max-memory" value="20" min="5" max="100" oninput="updateTokenEstimate()">
                         <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
                             💡 每次AI调用发送最近N条对话作为上下文。太少会失忆，太多会浪费token且可能超限。建议：日常聊天20条，深度对话30-50条
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>世界书扫描深度</label>
+                        <input type="number" id="character-worldbook-scan-depth" value="10" min="1" max="50">
+                        <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                            💡 扫描最近N条消息来匹配世界书关键词。数值越大匹配范围越广，但可能激活不相关的条目。建议：5-15条
                         </div>
                     </div>
                     <div class="input-group">
@@ -11745,10 +11896,27 @@ ${taskList}
             <label>条目名称</label>
             <input type="text" id="entry-name" placeholder="例如：艾尔登王国">
         </div>
+
+        <!-- 触发模式选择器 -->
         <div class="input-group">
-            <label>关键词（用逗号分隔）</label>
+            <label>触发模式</label>
+            <input type="hidden" id="entry-trigger-mode" value="keyword">
+            <div style="display:flex; gap:8px;">
+                <button type="button" id="trigger-always-btn" class="btn-sec" style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="setTriggerMode('always')">
+                    <span style="width:12px; height:12px; border-radius:50%; background:#2196F3; box-shadow:0 0 6px #2196F3;"></span>
+                    <span>常驻</span>
+                </button>
+                <button type="button" id="trigger-keyword-btn" class="btn-sec active" style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="setTriggerMode('keyword')">
+                    <span style="width:12px; height:12px; border-radius:50%; background:#4CAF50; box-shadow:0 0 6px #4CAF50;"></span>
+                    <span>关键词</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>关键词（用英文逗号分隔）</label>
             <input type="text" id="entry-keys" placeholder="例如：王国,艾尔登,首都">
-            <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">当对话中出现这些关键词时，该条目会被激活</div>
+            <div id="entry-keys-hint" style="font-size:0.7rem; opacity:0.6; margin-top:5px;">绿灯关键词模式：当对话中出现这些关键词时，该条目才会被激活</div>
         </div>
         <div class="input-group">
             <label>内容</label>
