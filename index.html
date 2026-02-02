@@ -3799,8 +3799,18 @@ ${gridText}`;
 
             let innerHTML = '';
 
+            // 获取消息发送模式
+            const msgMode = currentChatCharacter.settings.msgMode || 'split';
+
+            // 根据消息发送模式调整气泡宽度
+            // 当为完整String模式时，assistant消息占据更宽空间
+            let maxWidth = '70%';
+            if (msgMode === 'full' && !isUser) {
+                maxWidth = '95%'; // assistant消息在完整模式下占据95%宽度
+            }
+
             // 构建气泡样式（自定义CSS会覆盖默认样式）
-            let bubbleStyle = `max-width:70%; background:${bgColor}; color:${textColor}; padding:8px 12px; border-radius:16px; ${!isUser ? 'border-left:3px solid var(--accent);' : ''} cursor:pointer; position:relative; font-size:${bubbleSize}px;`;
+            let bubbleStyle = `max-width:${maxWidth}; background:${bgColor}; color:${textColor}; padding:8px 12px; border-radius:16px; ${!isUser ? 'border-left:3px solid var(--accent);' : ''} cursor:pointer; position:relative; font-size:${bubbleSize}px;`;
 
             // 应用自定义CSS（如果有的话）
             const customCss = isUser ? customCssUser : customCssAi;
