@@ -1,0 +1,1956 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="default">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tara's LifeOS Chronos BinGO</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a1a1a">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" href="icon.png">
+    <link rel="apple-touch-icon" href="icon.png">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <!-- Markdown-it CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.1/dist/markdown-it.min.js"></script>
+
+    <!-- KaTeX for LaTeX math rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+
+    <!-- Dexie.js for IndexedDB -->
+    <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+
+    <!-- Pako for gzip compression (cloud backup) -->
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+</head>
+<body>
+
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+        <span class="menu-btn" onclick="toggleSidebar()">☰</span>
+        <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+            <div class="app-name">Tara's LifeOS Chronos BinGO</div>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <span id="network-indicator" style="font-size:12px; cursor:help;" title="网络状态">🟢</span>
+                <div class="sys-clock" id="sys-clock">00:00</div>
+            </div>
+            <div class="balance-pill">
+                <span>🪙</span>
+                <span id="balance-display">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 侧边栏遮罩 -->
+    <div id="sidebar-overlay" onclick="closeSidebar()"></div>
+
+    <!-- 侧边栏 -->
+    <div id="sidebar">
+        <div class="sidebar-header">
+            <h2> 控制台</h2>
+            <span class="sidebar-close" onclick="closeSidebar()">×</span>
+        </div>
+        <div class="sidebar-content">
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('ai-assistant')">
+                <span class="menu-icon" style="display:flex;align-items:center;justify-content:center;"><img src="data:image/webp;base64,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BMYhcYBdTRiotB9FDxps/nyt5rEjV0jT6upGRixAXTfAU/lGADFIpGAXU1ATGIXGAXU1ATGH9CpA0wtLIxMT0Yc+YvWvJTzB47pjEXkyrKigfkgwi20zupqAmMQuMAupqAmMQpr1JY6OrZFCzdbZeiQNMxgDrKqagLGAy3tqzK5i4wC6moCYxC4wC6moCYwdn7mZ6lXVDTJZzwtNS5Q2LmiuAp/AtwviLbTO6moCYxC4wC6moCYxC4vR8BQM9Q3+WbfjbxFqSwFIoRQPyQYRbaZ3U1ATGIXGAXU1ATGIXGAXECt9wvaACrrBI1iPKF3Bzvi6g67HcD8ftM7qagJjELjALqagJjELjALqW68wgvSFAAWUU+/E8rqP6U9uX5XMXGAXU1ATGIXGAXU1ATGIXGAXFr0dagtFpnyKKK9vAXU1ATGIXGAXU1ATGIXGAXU1ATGIU1hF0ZmVCr4xiPifHsp/AqeI7qagJjELjALqagJjELjALqagJjELckbDlD6/BdVvkHE37i4BXmMQuMAupqAmMQuMAupqAmMQuMAupacsyaeun2iOslrFUop8L/E8rmLjALqagJjELjALqagJjELjALpsIaJ1/1srmKYF81RFndTUBMYhcYBdTUBMYhcYBdTUBMYhcX/bxQgo6Q7DiSmz9cqF1NQExiFxgF1NQExiFxgF1NQExiFxgFxAiz65u6ulM6ILb8WIF1NQExiFxgF1NQExiFxgF1NQExiFxgFxIu+w+j4iEMj/80BP5XMXGAXU1ATGIXGAXU1ATGIXGAXU1ATFRpFEKex14PS7gdATY0QuMAupqAmMQuMAupqAmMQuMAupqAmMQpw7OGEFzmy15jELjALqagJjELjALqagJjELjALqagJjCAXpRX477VmVzFxgF1NQExiFxgF1NQExiFxgF1NQExh/MrY4JzV/xw3OzupqAmMQuMAupqAmMQuMAupqAmMQuMAupori8omUXpt+8yuYuMAupqAmMQuMAupqAmMQuMAupqAmMP9yV7Feel0s6zMrmLjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJioAAP7FzQAAAAAAAAAAAAAABdGJPp1NV+zG2bLCQXvIX5kF2Jbm4aNgxXXPsRu5JXnFJbB69pUT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" style="width:24px;height:24px;border-radius:50%;object-fit:cover;"></span>
+                <span>AI助手</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('api-config')">
+                <span class="menu-icon">⚙️</span>
+                <span>API设置</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('character-manager')">
+                <span class="menu-icon">📇</span>
+                <span>信息管理</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('world-book-manager')">
+                <span class="menu-icon">📚</span>
+                <span>世界书</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openLibraryPanel()">
+                <span class="menu-icon">📖</span>
+                <span>图书馆</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('background-activity')">
+                <span class="menu-icon">🔄</span>
+                <span>后台活动</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('cloud-backup')">
+                <span class="menu-icon">☁️</span>
+                <span>云备份</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('data-manager')">
+                <span class="menu-icon">📊</span>
+                <span>数据管理</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. 日历 (Calendar) -->
+    <div id="view-calendar" class="view active container">
+        <div class="cal-nav">
+            <div class="cal-btn" onclick="changeMonth(-1)" style="cursor:pointer; padding:5px;">‹</div>
+            <div style="text-align:center;">
+                <div style="font-weight:bold; color:var(--accent);" id="cal-title">Month</div>
+                <div style="font-size:0.7rem; color:var(--text); opacity:0.6;" id="cal-year">Year</div>
+            </div>
+            <div class="cal-btn" onclick="changeMonth(1)" style="cursor:pointer; padding:5px;">›</div>
+        </div>
+        <div style="text-align:center; margin-bottom:10px;">
+            <span onclick="resetToToday()" style="font-size:0.75rem; padding:4px 10px; background:var(--card-bg); border-radius:15px; border:1px solid rgba(0,0,0,0.1); cursor:pointer;">↺ 回到今天</span>
+        </div>
+        <div class="calendar-grid" id="calendar-body"></div>
+        <h3 style="margin:20px 0 10px;">📑 进行中</h3>
+        <div id="active-list"></div>
+        <div style="height:20px;"></div>
+    </div>
+
+    <!-- 2. 焦点 (Focus) -->
+    <div id="view-focus" class="view container">
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:15px; text-align:center; position:relative; box-shadow:var(--shadow);">
+            <div style="position:absolute; right:15px; top:15px; font-size:1.5rem; cursor:pointer;" onclick="rollDice()">🎲</div>
+            <h2>今日焦点</h2>
+            <p style="font-size:0.8rem; opacity:0.6;">命运过滤器已就绪。</p>
+        </div>
+        <div style="margin: 10px 0; font-size:0.75rem; opacity:0.7;">🎯 抽签范围 (点击选中):</div>
+        <div id="focus-filter" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom:15px;"></div>
+        <div id="focus-list"></div>
+    </div>
+
+    <!-- 3. 商店 (Shop) -->
+    <div id="view-shop" class="view container">
+        <div class="gacha-banner" onclick="openGacha(event)">
+            <div class="gacha-gear" onclick="openGachaEditor(event)">⚙️</div>
+            <h2> 惊喜盲盒</h2>
+            <p style="font-size:0.8rem; opacity:0.9;">100 🪙 / 次 · 专治选择困难</p>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3> 愿望清单</h3>
+            <div style="display:flex; gap:10px;">
+                <button class="btn-sec" style="width:auto; padding:4px 10px; font-size:0.7rem;" onclick="openHistory()">- 账单</button>
+                <button class="btn-sec" style="width:auto; padding:4px 10px; font-size:0.7rem;" onclick="openAddItemModal()">+ 进货</button>
+            </div>
+        </div>
+        <div id="shop-list" class="shop-grid"></div>
+        <p style="text-align:center; font-size:0.7rem; opacity:0.5; margin-top:20px;">“只有得不到的，才是最好的。” —— Vesper</p>
+    </div>
+
+    <!-- 4. 仪表盘 (Stats) -->
+    <div id="view-stats" class="view container">
+        <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+            <button class="btn-sec" id="btn-refresh" style="font-size:0.75rem; padding:6px 15px; border-radius:20px; border:1px solid rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; background:var(--card-bg);" onclick="manualRefresh()">
+                <span>↻</span> 同步数据流
+            </button>
+        </div>
+        <div class="vesper-comment" id="vesper-report">...</div>
+
+        <!-- Theme Switcher -->
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:15px; box-shadow:var(--shadow);">
+            <h3 style="margin-bottom:15px; font-size:1rem;">🎨 视觉调制</h3>
+            <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; justify-items:center;">
+                <div onclick="setTheme('default')" style="width:30px; height:30px; background:#F0EAD6; border-radius:50%; border:2px solid #8B5A2B; cursor:pointer;" title="Default"></div>
+                <div onclick="setTheme('silent')" style="width:30px; height:30px; background:#000000; border-radius:50%; border:2px solid #CFFFE2; cursor:pointer;" title="无声"></div>
+                <div onclick="setTheme('fog')" style="width:30px; height:30px; background:#EFF2F2; border-radius:50%; border:2px solid #5D6973; cursor:pointer;" title="白雾"></div>
+                <div onclick="setTheme('dream')" style="width:30px; height:30px; background:#DFF2FC; border-radius:50%; border:2px solid #95C2E2; cursor:pointer;" title="蓝白"></div>
+                <div onclick="setTheme('lime')" style="width:30px; height:30px; background:#E3F0E5; border-radius:50%; border:2px solid #81C784; cursor:pointer;" title="青柠"></div>
+            </div>
+            <p style="font-size:0.7rem; color:var(--text); opacity:0.6; margin-top:10px; text-align:center;">“颜色即情绪。”</p>
+        </div>
+
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:15px; box-shadow:var(--shadow);">
+            <h3 style="margin-bottom:15px; font-size:1rem;">🎬 活跃热力图</h3>
+            <div class="heatmap-grid" id="heatmap-body"></div>
+        </div>
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:15px; box-shadow:var(--shadow);">
+            <h3 style="margin-bottom:15px; font-size:1rem;">📈 专注度趋势</h3>
+            <div style="position:relative; height:180px; width:100%;"><canvas id="chart-line"></canvas></div>
+        </div>
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:15px; box-shadow:var(--shadow);">
+            <h3 style="margin-bottom:15px; font-size:1rem;">🍰 能量分配</h3>
+            <div style="position:relative; height:150px; width:100%;"><canvas id="chart-pie"></canvas></div>
+        </div>
+
+        <!-- AI 周报区域 -->
+        <div style="background:linear-gradient(135deg, var(--accent), var(--highlight)); border-radius:16px; padding:20px; margin-bottom:15px; box-shadow:var(--shadow); color:var(--bg);">
+            <h3 style="margin-bottom:10px; font-size:1rem; display:flex; align-items:center; gap:8px;">✨ AI 周报</h3>
+            <p style="font-size:0.8rem; opacity:0.9; margin-bottom:15px; line-height:1.5;">让 Vesper 分析你过去7天的数据，生成一份独特的周报卡片。</p>
+            <button class="btn" style="background:var(--bg); color:var(--text); margin-top:0;" onclick="generateAIWeeklyReport()">✨ 生成 AI 周报</button>
+        </div>
+
+        <button class="btn" style="background:var(--text); color:var(--bg);" onclick="generateWeeklyReport()">生成本周分析报告 </button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="switchTab('archive')"> 进入历史档案室</button>
+    </div>
+
+    <!-- 5. 档案 (Archive) -->
+    <div id="view-archive" class="view container">
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
+            <button class="btn-sec" style="width:auto; padding:5px 10px;" onclick="switchTab('stats')">← 返回</button>
+            <h2>档案室</h2>
+        </div>
+
+        <!-- 周报档案区块 -->
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:20px; box-shadow:var(--shadow);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3 style="font-size:1rem; margin:0;">✨ AI 周报档案</h3>
+                <span style="font-size:0.75rem; opacity:0.6;" id="report-archive-count">0 份报告</span>
+            </div>
+            <div id="report-archive-list" style="max-height:300px; overflow-y:auto;">
+                <p style="text-align:center; opacity:0.5; font-size:0.85rem; padding:20px 0;">暂无存档的周报</p>
+            </div>
+        </div>
+
+        <!-- 项目档案区块 -->
+        <div style="background:var(--card-bg); border-radius:16px; padding:20px; margin-bottom:20px; box-shadow:var(--shadow);">
+            <h3 style="font-size:1rem; margin:0 0 15px 0;">📦 项目档案</h3>
+            <div style="margin-bottom:15px;">
+                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                    <div class="filter-chip active" onclick="filterArchive('all', this)">全部</div>
+                    <div class="filter-chip" onclick="filterArchive('📚 学习', this)">📚 学习</div>
+                    <div class="filter-chip" onclick="filterArchive('🏠 生活', this)">🏠 生活</div>
+                    <div class="filter-chip" onclick="filterArchive('🎮 娱乐', this)">🎮 娱乐</div>
+                    <div class="filter-chip" onclick="filterArchive('🎨 创造', this)">🎨 创造</div>
+                </div>
+            </div>
+            <div id="archive-list"></div>
+        </div>
+
+        <!-- 数据控制台 -->
+        <div style="background:var(--card-bg); padding:20px; border-radius:16px; border:1px dashed rgba(0,0,0,0.1);">
+            <h3 style="color:var(--accent);"> 数据控制台</h3>
+            <button class="btn" onclick="exportData()"> 备份数据 (.json)</button>
+            <div style="margin-top:20px; padding-top:15px; border-top:1px dashed rgba(0,0,0,0.1);">
+                <input type="file" id="file-import" style="display:none" onchange="handleFile(this)">
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-sec" onclick="triggerImport('merge')"> 融合</button>
+                    <button class="btn btn-danger" onclick="triggerImport('overwrite')"> 覆盖</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 游戏视图 -->
+    <div id="view-game" class="view container">
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px; align-items:center;">
+            <span onclick="switchTab('calendar')" style="color:var(--text); opacity:0.5; cursor:pointer;">← 返回</span>
+            <span id="game-badge" style="font-size:0.8rem; font-weight:bold;">Normal</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+             <h2 id="game-title" style="color:var(--accent);">Theme</h2>
+             <button id="btn-edit-mode" style="font-size:0.75rem; padding:4px 8px; border:1px solid rgba(0,0,0,0.2); background:var(--card-bg); border-radius:5px; color:var(--text);" onclick="toggleEditMode()">✎ 修改</button>
+        </div>
+        <div id="game-deadline" style="text-align:center; margin:8px 0; font-size:0.8rem; color:var(--deadline); font-weight:bold; display:none;"></div>
+        <div id="bingo-board" class="bingo-grid"></div>
+        <div style="background:var(--card-bg); padding:15px; border-radius:10px; font-size:0.8rem; color:var(--text); margin-top:15px; box-shadow: var(--shadow); border-left: 3px solid var(--accent);">
+            <span style="font-weight:bold;">Vesper:</span> <span id="vesper-msg">...</span>
+        </div>
+        <div style="margin-top:15px; display:flex; gap:10px;">
+            <button class="btn btn-sec" onclick="archiveCurrent()"> 归档</button>
+            <button class="btn btn-danger" onclick="deleteCurrent()"> 删除</button>
+        </div>
+        <div id="journal-area" style="display:none; margin-top:20px;">
+            <h3>📝 随笔</h3>
+            <textarea id="inp-journal" style="width:100%; height:100px; padding:10px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); margin-top:5px; font-family:inherit;" placeholder="记录你在做这个任务时的想法、感受..."></textarea>
+            <button class="btn" onclick="saveJournal()">保存随笔</button>
+        </div>
+        <!-- 归档专属：总结框 -->
+        <div id="summary-area" style="display:none; margin-top:20px;">
+            <h3>📋 总结</h3>
+            <textarea id="inp-summary" style="width:100%; height:120px; padding:10px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); margin-top:5px; font-family:inherit;" placeholder="完成这个任务后的整体总结、收获、反思..."></textarea>
+            <button class="btn" onclick="saveSummary()">保存总结</button>
+        </div>
+        <!-- 归档专属功能区 -->
+        <div id="archive-actions-area" style="display:none; margin-top:20px; padding:15px; background:rgba(0,0,0,0.02); border-radius:12px; border:1px dashed var(--accent);">
+            <h3 style="margin:0 0 10px 0; font-size:0.9rem; color:var(--accent);">✨ 归档回顾功能</h3>
+            <div id="archive-review-display" style="display:none; background:rgba(0,0,0,0.03); padding:12px; border-radius:8px; margin-bottom:12px; border-left:3px solid var(--accent);">
+                <div style="font-weight:bold; font-size:0.75rem; margin-bottom:5px; opacity:0.7;">Vesper 评语:</div>
+                <div id="archive-review-text" style="font-style:italic; font-size:0.85rem; line-height:1.5;"></div>
+            </div>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn" id="btn-gen-review" onclick="generateArchiveReviewForCurrent()">✨ 生成评语</button>
+                <button class="btn btn-sec" id="btn-share-to-chat" onclick="openShareToCharacterModal()" style="display:none;">📤 分享给角色</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新建视图 -->
+    <div id="view-create" class="view container">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h2 style="margin:0;">新建计划</h2>
+            <button class="btn-sec" style="width:auto; padding:5px 12px; font-size:0.75rem; display:flex; align-items:center; gap:5px;" onclick="openAiTaskGenerator()">
+                <span>🤖</span> AI助手
+            </button>
+        </div>
+        <div class="input-group"><label>模式</label><select id="inp-mode" onchange="toggleDeadline(this.value)"><option value="normal">普通模式</option><option value="daily">每日循环</option><option value="deadline">期限挑战</option></select></div>
+        <div class="input-group" id="grp-date" style="display:none;"><label>截止</label><input type="date" id="inp-date"></div>
+        <div class="input-group"><label>主题</label><input type="text" id="inp-theme" placeholder="e.g. 2026 飞升计划"></div>
+        <div class="input-group"><label>分类</label><select id="inp-tag"><option value="学习"> 学习</option><option value="生活"> 生活</option><option value="娱乐"> 娱乐</option><option value="创造"> 创造</option></select></div>
+        <div class="input-group"><label>规格</label><select id="inp-size"><option value="3">3x3 (速战速决)</option><option value="4" selected>4x4 (标准)</option><option value="5">5x5 (长期战)</option></select></div>
+        
+        <div class="input-group">
+            <label>难度定级 (决定积分收益)</label>
+            <div class="difficulty-selector">
+                <div class="diff-btn active" onclick="setDifficulty('easy', this)">
+                    <div> 生存维持</div><div class="diff-info">Line +5 / Board +20</div>
+                </div>
+                <div class="diff-btn" onclick="setDifficulty('normal', this)">
+                    <div> 日常推进</div><div class="diff-info">Line +10 / Board +50</div>
+                </div>
+                <div class="diff-btn" onclick="setDifficulty('hard', this)">
+                    <div> 攻坚战</div><div class="diff-info">Line +20 / Board +100</div>
+                </div>
+                <div class="diff-btn" onclick="setDifficulty('hell', this)">
+                    <div> 死线挑战</div><div class="diff-info">Line +50 / Board +300</div>
+                </div>
+                <div class="diff-btn" onclick="setDifficulty('custom', this)">
+                    <div>🎯 自定义</div><div class="diff-info">自行设定奖励</div>
+                </div>
+            </div>
+        </div>
+        <div id="custom-difficulty-inputs" style="display:none; margin-top:10px; padding:15px; background:rgba(0,0,0,0.03); border-radius:8px; border-left:3px solid var(--accent);">
+            <div style="font-size:0.8rem; font-weight:bold; margin-bottom:10px; color:var(--accent);">自定义积分收益</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div>
+                    <label style="font-size:0.75rem; opacity:0.7;">连线积分 🪙</label>
+                    <input type="number" id="custom-line-points" value="15" style="width:100%; padding:8px; border-radius:6px; border:1px solid rgba(0,0,0,0.1); margin-top:3px;">
+                </div>
+                <div>
+                    <label style="font-size:0.75rem; opacity:0.7;">清盘积分 🪙</label>
+                    <input type="number" id="custom-board-points" value="80" style="width:100%; padding:8px; border-radius:6px; border:1px solid rgba(0,0,0,0.1); margin-top:3px;">
+                </div>
+            </div>
+            <div style="font-size:0.7rem; opacity:0.6; margin-top:8px; line-height:1.4;">💡 提示:激励必须与努力成比例。参考:简单任务(5/20),日常任务(10/50),困难任务(20/100),地狱难度(50/300)</div>
+        </div>
+
+        <div class="input-group"><label>任务列表 (每行一个，空行自动填充Free)</label><textarea id="inp-tasks" style="height:120px" placeholder="Task 1&#10;Task 2..."></textarea></div>
+        <button class="btn" onclick="createProject()">启动</button>
+    </div>
+
+    <!-- 底部导航 -->
+    <div class="nav-bar">
+        <div class="nav-item active" id="nav-calendar" onclick="switchTab('calendar')"><span class="nav-icon">📅</span><span>日历</span></div>
+        <div class="nav-item" id="nav-focus" onclick="switchTab('focus')"><span class="nav-icon">🎯</span><span>焦点</span></div>
+        <div class="nav-item" id="nav-create-tab" onclick="switchTab('create')">
+            <div class="add-icon-circle">+</div>
+        </div>
+        <div class="nav-item" id="nav-shop" onclick="switchTab('shop')"><span class="nav-icon">🛒</span><span>商店</span></div>
+        <div class="nav-item" id="nav-stats" onclick="switchTab('stats')"><span class="nav-icon">📊</span><span>数据</span></div>
+    </div>
+
+    <!-- 弹窗: 生物状态报告 -->
+    <div id="modal-status-report" class="modal"><div class="sheet">
+        <h3>🧬 生物状态报告</h3>
+        <p style="font-size:0.8rem; opacity:0.6; margin-bottom:15px;">向系统同步你的当前状态。</p>
+        
+        <div class="input-group">
+            <label>⚡ 能量值 (Energy): <span id="status-energy-val">50%</span></label>
+            <input type="range" id="status-energy" min="0" max="100" value="50" style="width:100%;" oninput="document.getElementById('status-energy-val').innerText = this.value + '%'">
+        </div>
+
+        <div class="input-group">
+            <label>🧠 情绪 (Mood)</label>
+            <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px;">
+                <div class="diff-btn" onclick="selectMood('Anxious', this)">😰 焦虑 (Anxious)</div>
+                <div class="diff-btn" onclick="selectMood('Calm', this)">😌 平静 (Calm)</div>
+                <div class="diff-btn" onclick="selectMood('Excited', this)">🤩 兴奋 (Excited)</div>
+                <div class="diff-btn" onclick="selectMood('Low', this)">😔 低落 (Low)</div>
+                <div class="diff-btn" onclick="selectMood('Tired', this)">😪 疲惫 (Tired)</div>
+                <div class="diff-btn" onclick="selectMood('Focused', this)">🧠 专注 (Focused)</div>
+            </div>
+        </div>
+
+        <button class="btn" onclick="confirmSendStatus()">📡 发送报告</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-status-report')">取消</button>
+    </div></div>
+
+    <!-- 弹窗: 积分获取 -->
+    <div id="modal-points" class="modal" style="align-items:center;"><div class="sheet" style="text-align:center; border-radius:20px;">
+        <div style="font-size:3rem; animation: bounce 1s infinite;">🪙</div>
+        <h2 style="color:var(--accent);">BINGO!</h2>
+        <p style="font-size:1rem; opacity:0.7; margin:10px 0;">连线成功，获得奖励</p>
+        <div style="font-size:2.5rem; font-weight:bold; color:var(--gold); margin-bottom:20px;">+<span id="points-earned">0</span></div>
+        <button class="btn" onclick="collectPoints()">收下</button>
+    </div></div>
+
+    <!-- 弹窗: 添加商品 -->
+    <div id="modal-add-item" class="modal"><div class="sheet">
+        <h3>进货</h3>
+        <div class="input-group"><label>名称</label><input type="text" id="new-item-name" placeholder="e.g. 喝杯奶茶"></div>
+        <div class="input-group"><label>图标 (Emoji)</label><input type="text" id="new-item-icon" value="🥤" placeholder="🥤"></div>
+        <div class="input-group"><label>价格 (🪙)</label><input type="number" id="new-item-cost" value="20"></div>
+        <div class="input-group"><label>类型</label><select id="new-item-type"><option value="unlimited">无限量 (随时可买)</option><option value="cooldown">冷却型 (每日一次)</option></select></div>
+        <button class="btn" onclick="addNewItem()">上架</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-add-item')">取消</button>
+    </div></div>
+
+    <!-- 弹窗: 历史账单 -->
+    <div id="modal-history" class="modal"><div class="sheet">
+        <h3>📜 消费流水</h3>
+        <p style="font-size:0.8rem; opacity:0.6; margin-bottom:15px;">快乐的收据。</p>
+        <div id="history-list" style="max-height:300px; overflow-y:auto; margin-bottom:20px;"></div>
+        <button class="btn" onclick="closeModal('modal-history')">关闭</button>
+    </div></div>
+
+    <!-- 弹窗: Gacha Pool Editor -->
+    <div id="modal-gacha-editor" class="modal"><div class="sheet">
+        <h3> 管理扭蛋池</h3>
+        <p style="font-size:0.8rem; opacity:0.6; margin-bottom:10px;">Vesper: "惊喜必须是你真正想要的东西。"</p>
+        <div style="display:flex; gap:5px; margin-bottom:15px;">
+            <input type="text" id="new-gacha-item" placeholder="添加新奖励..." style="flex:1; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:8px;">
+            <button class="btn" style="width:auto; margin-top:0;" onclick="addGachaItem()">添加</button>
+        </div>
+        <div id="gacha-pool-list" style="max-height:250px; overflow-y:auto; margin-bottom:20px; border-top:1px solid rgba(0,0,0,0.1);"></div>
+        <button class="btn btn-sec" onclick="closeModal('modal-gacha-editor')">完成</button>
+    </div></div>
+    
+    <!-- 弹窗: 扭蛋结果 -->
+    <div id="modal-gacha-result" class="modal" style="align-items:center;"><div class="sheet" style="text-align:center; border-radius:20px;">
+        <div style="font-size:3rem;">🎁</div>
+        <h3 style="opacity:0.7;">盲盒打开了...</h3>
+        <div id="gacha-result-text" style="font-size:1.5rem; font-weight:bold; color:var(--accent); margin:20px 0; min-height:50px;"></div>
+        <button class="btn" onclick="closeModal('modal-gacha-result')">太棒了</button>
+    </div></div>
+
+    <!-- 弹窗: 番茄钟/任务 -->
+    <div id="modal-timer" class="modal"><div class="sheet">
+        <h3 id="timer-title">Task</h3>
+        <div class="filter-bar" style="margin:15px 0;">
+            <div class="filter-chip" onclick="startTimer(0)">直接完成</div>
+            <div class="filter-chip active" onclick="startTimer(25)">25m</div>
+            <div class="filter-chip" onclick="startTimer(35)">35m</div>
+            <div class="filter-chip" onclick="startTimer(60)">60m</div>
+            <div class="filter-chip" onclick="showCustomTimer()">自定义</div>
+        </div>
+
+        <!-- SVG圆环番茄钟 -->
+        <div id="timer-display" style="display:none; margin:30px 0; text-align:center;">
+            <svg width="200" height="200" viewBox="0 0 200 200" style="transform: rotate(-90deg);">
+                <!-- 背景圆环 -->
+                <circle cx="100" cy="100" r="85" fill="none" stroke="rgba(var(--accent-rgb), 0.2)" stroke-width="12"/>
+                <!-- 进度圆环 -->
+                <circle id="timer-progress-ring" cx="100" cy="100" r="85" fill="none"
+                    stroke="var(--accent)" stroke-width="12"
+                    stroke-dasharray="534.07" stroke-dashoffset="0"
+                    stroke-linecap="round"
+                    style="transition: stroke-dashoffset 1s linear;"/>
+            </svg>
+            <div id="timer-text" style="font-family: 'JetBrains Mono', monospace; font-size:2.5rem; margin-top:-130px; position:relative; z-index:1; color:var(--text);">25:00</div>
+        </div>
+
+        <!-- 自定义时间输入 -->
+        <div id="custom-timer-input" style="display:none; margin:20px 0; text-align:center;">
+            <input type="number" id="custom-minutes" min="1" max="120" value="25"
+                style="width:80px; padding:10px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); background:var(--card-bg); color:var(--text); text-align:center; font-size:1.2rem; font-family:'JetBrains Mono', monospace;">
+            <span style="margin:0 10px; font-size:1.2rem;">分钟</span>
+            <button class="btn" style="width:auto; padding:8px 20px;" onclick="startCustomTimer()">开始</button>
+        </div>
+
+        <button class="btn btn-sec" onclick="closeModal('modal-timer')">取消</button>
+    </div></div>
+
+    <!-- 全屏番茄钟 -->
+    <div id="fullscreen-timer" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:9999; flex-direction:column; align-items:center; justify-content:center;">
+        <!-- 退出按钮 - 左上角 -->
+        <button onclick="exitFullscreenTimer()" style="position:absolute; top:20px; left:20px; background:rgba(var(--accent-rgb), 0.1); border:1px solid var(--accent); color:var(--accent); padding:8px 16px; border-radius:20px; cursor:pointer; font-size:0.85rem; z-index:10000; backdrop-filter:blur(5px); transition:all 0.2s;">
+            ← 退出
+        </button>
+
+        <!-- 系统时间 - 右上角 -->
+        <div id="fullscreen-system-time" style="position:absolute; top:20px; right:20px; font-family:'JetBrains Mono', monospace; font-size:1rem; color:var(--text); opacity:0.6; z-index:10000;">
+            00:00:00
+        </div>
+
+        <div style="text-align:center; width:100%; padding:20px;">
+            <!-- 任务标题 -->
+            <h2 id="fullscreen-timer-title" style="color:var(--accent); margin-bottom:20px; font-size:1.3rem; font-weight:500; opacity:0.9;">Task</h2>
+
+            <!-- 全屏SVG圆环 -->
+            <div style="position:relative; display:inline-block;">
+                <svg width="280" height="280" viewBox="0 0 280 280" style="transform: rotate(-90deg);">
+                    <circle cx="140" cy="140" r="120" fill="none" stroke="rgba(var(--accent-rgb), 0.1)" stroke-width="12"/>
+                    <circle id="fullscreen-progress-ring" cx="140" cy="140" r="120" fill="none"
+                        stroke="var(--accent)" stroke-width="12"
+                        stroke-dasharray="753.98" stroke-dashoffset="0"
+                        stroke-linecap="round"
+                        style="transition: stroke-dashoffset 1s linear;"/>
+                </svg>
+
+                <!-- 倒计时文本 -->
+                <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center;">
+                    <div id="fullscreen-timer-text" style="font-family: 'JetBrains Mono', monospace; font-size:3.5rem; color:var(--text); font-weight:300; line-height:1;">25:00</div>
+                    <div style="font-size:0.8rem; color:var(--text); opacity:0.5; margin-top:10px;">专注时间</div>
+                </div>
+            </div>
+
+            <!-- 进度百分比 -->
+            <div id="fullscreen-progress-percentage" style="margin-top:30px; font-family:'JetBrains Mono', monospace; font-size:1rem; color:var(--accent); opacity:0.7;">
+                100%
+            </div>
+
+            <!-- 激励语 -->
+            <div id="fullscreen-motivation" style="margin-top:20px; font-size:0.9rem; color:var(--text); opacity:0.5; font-style:italic;">
+                "专注是通往卓越的唯一道路"
+            </div>
+        </div>
+    </div>
+    
+    <!-- 弹窗: DayDetail -->
+    <div id="modal-day-detail" class="modal"><div class="sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h2 id="day-detail-date" style="color:var(--accent);">YYYY-MM-DD</h2>
+            <button class="btn btn-sec" style="width:auto; padding:5px 10px; font-size:0.7rem;" onclick="closeModal('modal-day-detail')">关闭</button>
+        </div>
+        
+        <div class="day-stat-grid">
+            <div class="day-stat-item"><div id="dd-completed">0</div><div>已完成</div></div>
+            <div class="day-stat-item"><div id="dd-total">0</div><div>总交互</div></div>
+            <div class="day-stat-item"><div id="dd-rate">0%</div><div>效率</div></div>
+        </div>
+
+        <h3 style="font-size:0.9rem; margin-bottom:10px; border-bottom:1px solid rgba(0,0,0,0.1); padding-bottom:5px;">📝 荣耀记录</h3>
+        <div id="day-detail-list" style="max-height:200px; overflow-y:auto; margin-bottom:20px;"></div>
+    </div></div>
+    
+    <!-- 弹窗: Weekly Report Modal -->
+    <div id="modal-report" class="modal"><div class="sheet">
+        <h3 style="color:var(--accent); margin-bottom:10px;">📋 Vesper 分析报告</h3>
+        <div id="report-text" style="white-space:pre-wrap; font-family:'JetBrains Mono'; margin-bottom:20px; font-size:0.85rem; line-height:1.6; background:rgba(0,0,0,0.03); padding:15px; border-radius:8px; border-left:3px solid var(--accent);"></div>
+        <button class="btn" onclick="closeModal('modal-report')">归档报告</button>
+    </div></div>
+
+    <!-- 弹窗: AI 周报 Modal -->
+    <div id="modal-ai-report" class="modal" style="align-items:center;"><div class="sheet" style="border-radius:20px; max-width:420px; margin:auto;">
+        <div id="ai-report-content">
+            <!-- 生成中状态 -->
+            <div id="ai-report-loading" class="ai-report-generating">
+                <div class="spinner"></div>
+                <p style="font-size:0.9rem; color:var(--text); opacity:0.8;">Vesper 正在分析你的数据...</p>
+                <p style="font-size:0.75rem; color:var(--text); opacity:0.5; margin-top:10px;">"让我看看你这周都干了什么..."</p>
+            </div>
+            <!-- 报告卡片 (生成后显示) -->
+            <div id="ai-report-card-area" style="display:none;"></div>
+        </div>
+        <div id="ai-report-actions" style="display:none; margin-top:15px;">
+            <button class="btn" onclick="saveCurrentAIReport()">📦 存入档案</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-ai-report')">关闭</button>
+        </div>
+    </div></div>
+
+    <!-- 弹窗: 查看存档的 AI 周报 -->
+    <div id="modal-view-archived-report" class="modal" style="align-items:center;"><div class="sheet" style="border-radius:20px; max-width:420px; margin:auto;">
+        <div id="archived-report-content"></div>
+        <div style="margin-top:15px; display:flex; gap:10px;">
+            <button class="btn btn-sec" style="flex:1;" onclick="closeModal('modal-view-archived-report')">关闭</button>
+            <button class="btn btn-danger" style="flex:1;" onclick="deleteCurrentArchivedReport()">删除</button>
+        </div>
+    </div></div>
+
+    <div id="modal-edit-task" class="modal"><div class="sheet"><input type="text" id="inp-edit-task" style="width:100%;padding:10px;margin-bottom:10px;border-radius:8px;border:1px solid rgba(0,0,0,0.1);background:var(--card-bg);color:var(--text);"><button class="btn" onclick="confirmTaskEdit()">确认</button></div></div>
+
+    <!-- 弹窗: 子任务菜单 -->
+    <div id="modal-subtask-menu" class="modal"><div class="sheet" style="text-align:center;">
+        <h3 style="margin-bottom:20px; color:var(--accent);" id="subtask-title">任务管理</h3>
+        <button class="btn" onclick="createSubtask()" style="margin-bottom:10px;">📋 创建子项目 Bingo 卡</button>
+        <button class="btn btn-sec" id="btn-open-subtask" onclick="openSubtask()" style="display:none; margin-bottom:10px;">🔗 进入关联子项目</button>
+        <button class="btn btn-sec" onclick="closeModal('modal-subtask-menu')">取消</button>
+    </div></div>
+
+    <!-- 弹窗: 分组管理 -->
+    <div id="modal-group-manager" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px;">好友分组管理</h3>
+        <div class="input-group">
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="new-group-name" placeholder="输入新分组名称">
+                <button class="btn" style="width:auto;" onclick="addNewGroup()">添加</button>
+            </div>
+        </div>
+        <div id="group-list-container" style="max-height:300px; overflow-y:auto; margin-top:15px;">
+            <!-- Groups will be listed here -->
+        </div>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-group-manager')">关闭</button>
+    </div></div>
+
+    <!-- AI任务生成器弹窗 -->
+    <div id="modal-ai-task-generator" class="modal"><div class="sheet">
+        <h3 style="color:var(--accent); margin-bottom:15px;">🤖 AI任务生成器</h3>
+        <p style="font-size:0.8rem; opacity:0.7; margin-bottom:15px;">描述你的目标,AI将自动生成Bingo任务列表</p>
+        <div class="input-group">
+            <label>你的目标</label>
+            <textarea id="ai-task-goal" rows="4" placeholder="例如: 我想在一个月内学会Python基础编程,包括语法、数据结构和简单项目"></textarea>
+        </div>
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+            <div class="input-group" style="flex:1;">
+                <label>Bingo规格</label>
+                <select id="ai-task-size">
+                    <option value="3">3x3 (9个任务)</option>
+                    <option value="4" selected>4x4 (16个任务)</option>
+                    <option value="5">5x5 (25个任务)</option>
+                </select>
+            </div>
+            <div class="input-group" style="flex:1;">
+                <label>任务分类</label>
+                <select id="ai-task-category">
+                    <option value="📚 学习">📚 学习</option>
+                    <option value="🏠 生活">🏠 生活</option>
+                    <option value="🎮 娱乐">🎮 娱乐</option>
+                    <option value="🎨 创造">🎨 创造</option>
+                </select>
+            </div>
+        </div>
+        <button class="btn" onclick="generateTasksWithAI()" id="btn-generate-tasks">🚀 生成任务列表</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-ai-task-generator')">取消</button>
+    </div></div>
+
+    <!-- 长按菜单: AI 助手 -->
+    <div id="ai-context-menu" class="context-menu">
+        <div class="context-menu-item" onclick="handleAiContextAction('copy')">📋 复制内容</div>
+        <div class="context-menu-item" onclick="handleAiContextAction('edit')">✎ 编辑消息</div>
+        <div class="context-menu-item" onclick="handleAiContextAction('quote')">💬 引用回复</div>
+        <div class="context-menu-item" onclick="handleAiContextAction('retry')">🔄 刷新回复</div>
+        <div class="context-menu-item" onclick="handleAiContextAction('hide')">🙈 撤回消息</div>
+        <div class="context-menu-item" onclick="handleAiContextAction('multiSelect')">☑️ 多选消息</div>
+        <div class="context-menu-item" style="color:#c62828;" onclick="handleAiContextAction('delete')">🗑️ 永久删除</div>
+    </div>
+
+    <!-- 长按菜单: 角色聊天 -->
+    <div id="character-message-menu" class="context-menu">
+        <div class="context-menu-item" onclick="handleCharacterMessageAction('copy')">📋 复制内容</div>
+        <div class="context-menu-item" onclick="handleCharacterMessageAction('edit')">✎ 编辑消息</div>
+        <div class="context-menu-item" onclick="handleCharacterMessageAction('quote')">💬 引用回复</div>
+        <div class="context-menu-item" onclick="handleCharacterMessageAction('retry')">🔄 刷新回复</div>
+        <div class="context-menu-item" onclick="handleCharacterMessageAction('hide')">🙈 撤回消息</div>
+        <div class="context-menu-item" onclick="handleCharacterMessageAction('multiSelect')">☑️ 多选消息</div>
+        <div class="context-menu-item" style="color:#c62828;" onclick="handleCharacterMessageAction('delete')">🗑️ 永久删除</div>
+    </div>
+
+    <!-- 多选工具栏 -->
+    <div id="multi-select-toolbar" class="multi-select-toolbar">
+        <span class="multi-select-count">已选择 <span id="selected-count">0</span> 条</span>
+        <button id="multi-select-all-btn" onclick="selectAllMessages()">全选</button>
+        <button id="multi-select-cancel-btn" onclick="cancelMultiSelect()">取消</button>
+        <button id="multi-select-delete-btn" class="delete-btn" onclick="deleteSelectedMessages()">🗑️ 删除</button>
+    </div>
+
+    <!-- 搜索结果面板 -->
+    <div id="search-results-panel" class="search-results-panel" onclick="closeSearchResults(event)">
+        <div class="search-results-content" onclick="event.stopPropagation()">
+            <div class="search-results-header">
+                <h3>搜索结果 <span id="search-results-count"></span></h3>
+                <button class="search-results-close" onclick="closeSearchResults()">×</button>
+            </div>
+            <div id="search-results-list" class="search-results-list"></div>
+        </div>
+    </div>
+
+
+    <!-- 侧边栏面板 -->
+    <div id="panel-ai-assistant" class="sidebar-panel modal" style="align-items: flex-start; background: var(--bg);">
+        <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
+            <!-- 聊天头部 -->
+            <div style="background:var(--card-bg); padding:15px; display:flex; align-items:center; gap:15px; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
+                <span style="font-size:1.5rem; cursor:pointer;" onclick="closePanelBack()">←</span>
+                <img src="data:image/webp;base64,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BMYhcYBdTRiotB9FDxps/nyt5rEjV0jT6upGRixAXTfAU/lGADFIpGAXU1ATGIXGAXU1ATGH9CpA0wtLIxMT0Yc+YvWvJTzB47pjEXkyrKigfkgwi20zupqAmMQuMAupqAmMQpr1JY6OrZFCzdbZeiQNMxgDrKqagLGAy3tqzK5i4wC6moCYxC4wC6moCYwdn7mZ6lXVDTJZzwtNS5Q2LmiuAp/AtwviLbTO6moCYxC4wC6moCYxC4vR8BQM9Q3+WbfjbxFqSwFIoRQPyQYRbaZ3U1ATGIXGAXU1ATGIXGAXECt9wvaACrrBI1iPKF3Bzvi6g67HcD8ftM7qagJjELjALqagJjELjALqW68wgvSFAAWUU+/E8rqP6U9uX5XMXGAXU1ATGIXGAXU1ATGIXGAXFr0dagtFpnyKKK9vAXU1ATGIXGAXU1ATGIXGAXU1ATGIU1hF0ZmVCr4xiPifHsp/AqeI7qagJjELjALqagJjELjALqagJjELckbDlD6/BdVvkHE37i4BXmMQuMAupqAmMQuMAupqAmMQuMAupacsyaeun2iOslrFUop8L/E8rmLjALqagJjELjALqagJjELjALpsIaJ1/1srmKYF81RFndTUBMYhcYBdTUBMYhcYBdTUBMYhcX/bxQgo6Q7DiSmz9cqF1NQExiFxgF1NQExiFxgF1NQExiFxgFxAiz65u6ulM6ILb8WIF1NQExiFxgF1NQExiFxgF1NQExiFxgFxIu+w+j4iEMj/80BP5XMXGAXU1ATGIXGAXU1ATGIXGAXU1ATFRpFEKex14PS7gdATY0QuMAupqAmMQuMAupqAmMQuMAupqAmMQpw7OGEFzmy15jELjALqagJjELjALqagJjELjALqagJjCAXpRX477VmVzFxgF1NQExiFxgF1NQExiFxgF1NQExh/MrY4JzV/xw3OzupqAmMQuMAupqAmMQuMAupqAmMQuMAupori8omUXpt+8yuYuMAupqAmMQuMAupqAmMQuMAupqAmMP9yV7Feel0s6zMrmLjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJioAAP7FzQAAAAAAAAAAAAAABdGJPp1NV+zG2bLCQXvIX5kF2Jbm4aNgxXXPsRu5JXnFJbB69pUT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" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">
+                <div style="flex:1;">
+                    <div style="font-weight:bold; font-size:1rem; color:var(--accent);" id="ai-conversation-title">Vesper AI</div>
+                    <div id="ai-chat-status" style="font-size:0.7rem; opacity:0.6;">在线</div>
+                </div>
+                <span style="font-size:1.2rem; cursor:pointer; padding:5px;" onclick="toggleAiConversationList()" title="对话列表">⇆</span>
+                <span style="font-size:1.2rem; cursor:pointer;" onclick="openAiSettings()">⚙️</span>
+            </div>
+
+            <!-- 聊天消息区域 -->
+            <div id="ai-chat-container" style="flex:1; overflow-y:auto; overflow-x:hidden; padding:15px; display:flex; flex-direction:column; gap:15px; padding-bottom: 140px;">
+                <div style="text-align:center; opacity:0.5; margin-top:100px;">Vesper 在此待命。</div>
+            </div>
+
+            <!-- AI助手专用多选工具栏 -->
+            <div id="ai-multi-select-toolbar" style="display:none; position:fixed; bottom:120px; left:50%; transform:translateX(-50%); background:var(--card-bg); border-radius:20px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px 20px; z-index:10000; gap:15px; align-items:center;">
+                <span style="font-weight:bold; color:var(--accent);">已选择 <span id="ai-selected-count">0</span> 条</span>
+                <button onclick="selectAllAiMessages()" style="background:none; border:none; padding:8px 15px; border-radius:10px; cursor:pointer; font-size:0.9rem; color:var(--text);">全选</button>
+                <button onclick="cancelAiMultiSelect()" style="background:none; border:none; padding:8px 15px; border-radius:10px; cursor:pointer; font-size:0.9rem; color:var(--text);">取消</button>
+                <button onclick="deleteSelectedAiMessages()" style="background:none; border:none; padding:8px 15px; border-radius:10px; cursor:pointer; font-size:0.9rem; color:#c62828;">🗑️ 删除</button>
+            </div>
+
+            <!-- 消息输入区域 (包含工具栏) -->
+            <div id="ai-input-area" style="background:var(--card-bg); border-top:1px solid rgba(0,0,0,0.1); display:flex; flex-direction:column; position: fixed; bottom: 0; left: 0; width: 100%; padding-bottom: max(15px, env(safe-area-inset-bottom)); z-index: 1001;">
+                
+                <!-- AI 工具栏 -->
+                <div class="chat-toolbar" style="display:flex; gap:15px; padding:8px 12px; border-bottom:1px dashed rgba(0,0,0,0.1); background:var(--card-bg);">
+                    
+                    <div class="tool-icon" onclick="aiToolSendBingo()" title="注入任务数据">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="3" y1="9" x2="21" y2="9"></line>
+                            <line x1="9" y1="21" x2="9" y2="9"></line>
+                        </svg>
+                    </div>
+
+                    <div class="tool-icon" onclick="document.getElementById('ai-img-upload').click()" title="视觉信号">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M21 12c0 1.66-4 8-9 8s-9-6.34-9-8 4-8 9-8 9 6.34 9 8z"></path>
+                        </svg>
+                        <input type="file" id="ai-img-upload" accept="image/*" multiple style="display:none" onchange="aiToolSendImage(this)">
+                    </div>
+
+                    <div class="tool-icon" onclick="aiToolRollDice()" title="决策辅助">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 22h20L12 2z"></path> <circle cx="12" cy="16" r="1.5" fill="currentColor" stroke="none"></circle> </svg>
+                    </div>
+
+                    <div class="tool-icon" onclick="aiToolSendStatus()" title="生物状态">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 12l10 10 10-10L12 2z"></path>
+                        </svg>
+                    </div>
+                    
+                    <div class="tool-icon" onclick="aiToolSendLink()" title="发送链接">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                        </svg>
+                    </div>
+
+                    <div id="ai-search-toggle-btn" class="tool-icon" onclick="smartWebSearch('ai')" title="联网搜索 (智能)">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                    </div>
+
+                    <div id="ai-local-search-btn" class="tool-icon" onclick="smartLocalSearch('ai')" title="地点搜索 (智能)">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                            <circle cx="12" cy="10" r="3"></circle>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- 引用预览区域 -->
+                <div id="ai-quote-preview" class="quote-preview">
+                    <div id="ai-quote-preview-content" style="font-size:0.85rem; opacity:0.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:30px;"></div>
+                    <button class="quote-preview-close" onclick="clearAiQuotePreview()">×</button>
+                </div>
+
+                <!-- 输入框 -->
+                <div style="padding:10px 15px 15px; display:flex; gap:10px; align-items:flex-end;">
+                    <button id="ai-reply-btn" style="width:40px; height:40px; border-radius:50%; background:var(--card-bg); border:1px solid var(--accent); color:var(--accent); font-size:1.2rem; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex-shrink:0; display:none;" onclick="triggerAiAssistantResponse()" title="让AI回复">✨</button>
+                    <textarea id="ai-input" placeholder="输入消息... (Shift+Enter 换行)" style="flex:1; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:15px; resize:none; max-height:100px; font-family:inherit; background:var(--bg); color:var(--text); min-height:40px;" onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendAiUserMessage(); }"></textarea>
+                    <button id="ai-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.2rem; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0;" onclick="sendAiUserMessage()">↑</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI对话列表侧边栏 -->
+        <div id="ai-conversation-overlay" class="ai-conversation-overlay" onclick="closeAiConversationList()"></div>
+        <div id="ai-conversation-sidebar" class="ai-conversation-list-sidebar">
+            <div style="font-weight:bold; font-size:1.1rem; margin-bottom:15px; color:var(--accent);">对话列表</div>
+            <div id="ai-conversation-list-container"></div>
+        </div>
+    </div>
+
+    <div id="panel-api-config" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">⚙️ API设置</h3>
+                <span style="width:30px;"></span>
+            </div>
+
+            <h4 style="margin-bottom:10px; color:var(--accent);">主API配置</h4>
+            <div class="input-group">
+                <label>反代地址</label>
+                <input type="text" id="main-api-url" placeholder="https://api.openai.com/v1">
+            </div>
+            <div class="input-group">
+                <label>API密钥</label>
+                <input type="password" id="main-api-key" placeholder="sk-...">
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+                <button class="btn-sec" style="flex:1;" onclick="fetchModels('main')">🔄 拉取模型</button>
+                <button class="btn-sec" style="flex:1;" onclick="testApiConnection('main')">🧪 测试连接</button>
+            </div>
+            <div class="input-group">
+                <label>模型</label>
+                <select id="main-api-model">
+                    <option value="gpt-4">gpt-4</option>
+                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <label style="margin:0; flex:1;">温度 (0-2)</label>
+                    <input type="checkbox" id="main-api-temp-enabled" checked style="width:auto;" onchange="toggleApiParam('temp')">
+                    <span style="font-size:0.7rem; opacity:0.7;">启用</span>
+                </div>
+                <input type="number" id="main-api-temp" min="0" max="2" step="0.1" value="0.8">
+            </div>
+            <div class="input-group">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                    <label style="margin:0; flex:1;">Top-P (0-1)</label>
+                    <input type="checkbox" id="main-api-topp-enabled" style="width:auto;" onchange="toggleApiParam('topp')">
+                    <span style="font-size:0.7rem; opacity:0.7;">启用</span>
+                </div>
+                <input type="number" id="main-api-topp" min="0" max="1" step="0.05" value="1" disabled>
+                <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">某些模型可能不支持同时使用温度和Top-P</div>
+            </div>
+
+            <hr style="margin:20px 0; opacity:0.3;">
+
+            <h4 style="margin-bottom:10px; color:var(--accent);">联网搜索配置</h4>
+            <div class="input-group">
+                <label>搜索服务商</label>
+                <select id="search-provider-select" onchange="toggleSearchInputs()">
+                    <option value="google">Google Custom Search</option>
+                    <option value="serper">Serper.dev</option>
+                    <option value="zhipu">Zhipu AI</option>
+                    <option value="none">None (关闭)</option>
+                </select>
+            </div>
+            <div id="google-search-inputs">
+                <div class="input-group">
+                    <label>Google Search API Key</label>
+                    <input type="password" id="google-search-api-key" placeholder="Google API Key...">
+                </div>
+                <div class="input-group">
+                    <label>Google CX ID</label>
+                    <input type="text" id="google-search-cx" placeholder="Google CX ID...">
+                </div>
+            </div>
+            <div id="serper-search-inputs" style="display:none;">
+                <div class="input-group">
+                    <label>Serper API Key</label>
+                    <input type="password" id="serper-api-key" placeholder="Serper API Key...">
+                </div>
+            </div>
+            <div id="zhipu-search-inputs" style="display:none;">
+                <div class="input-group">
+                    <label>Zhipu API Key</label>
+                    <input type="password" id="zhipu-api-key" placeholder="Zhipu API Key...">
+                </div>
+            </div>
+
+            <hr style="margin:20px 0; opacity:0.3;">
+
+            <h4 style="margin-bottom:10px; color:var(--accent);"> 地图服务配置 (AMAP)</h4>
+            <div class="input-group">
+                <label>高德 Web 服务 Key</label>
+                <input type="password" id="amap-key-input" placeholder="输入高德 Web 服务 Key">
+            </div>
+            <div class="input-group">
+                <label>默认城市 (可选)</label>
+                <input type="text" id="user-city-input" placeholder="默认城市 (如: 东莞)">
+            </div>
+
+            <hr style="margin:20px 0; opacity:0.3;">
+
+            <h4 style="margin-bottom:10px; color:var(--accent);">副API配置 (可选)</h4>
+            <div class="input-group">
+                <label>反代地址</label>
+                <input type="text" id="sub-api-url" placeholder="https://api.openai.com/v1">
+            </div>
+            <div class="input-group">
+                <label>API密钥</label>
+                <input type="password" id="sub-api-key" placeholder="sk-...">
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+                <button class="btn-sec" style="flex:1;" onclick="fetchModels('sub')">🔄 拉取模型</button>
+                <button class="btn-sec" style="flex:1;" onclick="testApiConnection('sub')">🧪 测试连接</button>
+            </div>
+            <div class="input-group">
+                <label>模型</label>
+                <select id="sub-api-model">
+                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                    <option value="gpt-4">gpt-4</option>
+                </select>
+            </div>
+
+            <hr style="margin:20px 0; opacity:0.3;">
+
+            <h4 style="margin-bottom:10px; color:var(--accent);">预设管理</h4>
+            <div class="input-group">
+                <label>保存/加载预设</label>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <select id="api-preset-select" style="flex:1;">
+                        <option value="">-- 选择预设 --</option>
+                    </select>
+                    <button class="btn-sec" style="width:auto; padding:8px 12px; margin:0;" onclick="loadSelectedApiPreset()">📂</button>
+                    <button class="btn-sec" style="width:auto; padding:8px 12px; margin:0; color:#c62828;" onclick="deleteSelectedApiPreset()">🗑️</button>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="new-preset-name" placeholder="新预设名称" style="flex:1;">
+                    <button class="btn-sec" style="width:auto; padding:8px 12px; margin:0;" onclick="saveApiPresetWithName()">💾 保存</button>
+                </div>
+            </div>
+
+            <button class="btn" onclick="saveApiConfig()">保存当前配置</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <div id="panel-character-manager" class="sidebar-panel modal" style="align-items: flex-start; background: var(--bg);">
+        <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
+             <div class="header" style="background:var(--card-bg); padding:15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
+                <span class="back-btn" style="font-size:1.5rem; cursor:pointer;" onclick="closePanelBack()">←</span>
+                <h3 style="margin:0; color:var(--accent);">信息管理</h3>
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="openGroupManager()">📂 分组</button>
+                    <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="openCreateCharacterModal()">+</button>
+                    <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="openCharacterImportModal()">📥</button>
+                </div>
+            </div>
+            <div id="character-list" style="flex:1; overflow-y:auto;">
+                <div style="text-align:center; opacity:0.5; margin-top:50px;">暂无角色,点击右上角创建或导入</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建/编辑角色弹窗 -->
+    <div id="modal-create-character" class="modal modal-on-top"><div class="sheet">
+        <h3 style="margin-bottom:15px;" id="create-char-title">创建角色</h3>
+
+        <!-- 头像上传 -->
+        <div style="text-align:center; margin-bottom:20px;">
+            <div style="position:relative; display:inline-block;">
+                <img id="create-char-avatar-preview" src="https://via.placeholder.com/100?text=点击上传" style="width:100px; height:100px; border-radius:50%; object-fit:cover; border:3px solid var(--accent); cursor:pointer;" onclick="document.getElementById('create-char-avatar-input').click();">
+                <input type="file" id="create-char-avatar-input" accept="image/*" style="display:none;" onchange="previewCharacterAvatar(this)">
+            </div>
+            <div style="font-size:0.7rem; opacity:0.6; margin-top:8px;">点击头像上传图片</div>
+        </div>
+
+        <div class="input-group">
+            <label>角色名称 *</label>
+            <input type="text" id="create-char-name" placeholder="例如：小美">
+        </div>
+
+        <div class="input-group">
+            <label>角色设定</label>
+            <textarea id="create-char-description" rows="6" placeholder="描述角色的背景、性格、特点等..."></textarea>
+        </div>
+
+        <div class="input-group">
+            <label>第一句话（可选）</label>
+            <textarea id="create-char-first-mes" rows="3" placeholder="角色第一次见面时会说什么..."></textarea>
+        </div>
+
+        <button class="btn" onclick="saveNewCharacter()">✅ 保存角色</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-create-character')">取消</button>
+    </div></div>
+
+    <!-- 角色导入弹窗 -->
+    <div id="modal-character-import" class="modal modal-on-top"><div class="sheet">
+        <h3 style="margin-bottom:15px;">导入角色卡</h3>
+        <p style="font-size:0.8rem; opacity:0.7; margin-bottom:15px;">支持PNG格式(SillyTavern)和JSON格式</p>
+        <input type="file" id="character-file-input" accept=".png,.json" style="display:none;" onchange="handleCharacterFile(this)">
+        <button class="btn" onclick="document.getElementById('character-file-input').click()">📁 选择文件</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-character-import')">取消</button>
+    </div></div>
+
+    <!-- 角色详情/设置弹窗 -->
+    <div id="modal-character-detail" class="modal" style="align-items: flex-start; background: var(--bg);">
+        <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
+            <div class="header" style="background:var(--card-bg); padding:15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
+                <span class="back-btn" style="font-size:1.5rem; cursor:pointer;" onclick="closeSettingsAndReturnToChat()">←</span>
+                <h3 style="margin:0; color:var(--accent);">角色设置</h3>
+                <div style="display:flex; gap:8px;">
+                     <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="saveCharacterFullInfo()">保存</button>
+                </div>
+            </div>
+
+            <div style="flex:1; overflow-y:auto; padding:15px;">
+                
+                <!-- 身份信息 -->
+                <h4 class="settings-header">身份信息</h4>
+                <div class="settings-section">
+                    <div style="display:flex; gap:20px; align-items:center; margin-bottom:15px;">
+                        <div>
+                            <img id="character-detail-avatar" src="" style="width:70px; height:70px; border-radius:50%; object-fit:cover; border:2px solid var(--accent); cursor:pointer;" onclick="document.getElementById('character-detail-avatar-input').click();">
+                            <input type="file" id="character-detail-avatar-input" accept="image/*" style="display:none;" onchange="updateCharacterAvatar(this)">
+                            <div style="font-size:0.7rem; text-align:center; opacity:0.6; margin-top:5px;">角色头像</div>
+                        </div>
+                        <div>
+                            <img id="user-avatar-preview" src="https://via.placeholder.com/70" style="width:70px; height:70px; border-radius:50%; object-fit:cover; border:2px solid var(--text); cursor:pointer;" onclick="document.getElementById('user-avatar-input').click();">
+                            <input type="file" id="user-avatar-input" accept="image/*" style="display:none;" onchange="previewUserAvatar(this)">
+                            <div style="font-size:0.7rem; text-align:center; opacity:0.6; margin-top:5px;">我的头像</div>
+                        </div>
+                    </div>
+                    <div class="input-group"><label>备注名 (仅你可见)</label><input type="text" id="character-detail-nickname"></div>
+                    <div class="input-group"><label>角色本名 (AI识别)</label><input type="text" id="character-detail-name-input"></div>
+                    <div class="input-group">
+                        <label>好友分组</label>
+                        <div style="display:flex; gap:5px;">
+                            <select id="character-detail-group" style="flex:1;">
+                                <!-- 动态加载分组 -->
+                            </select>
+                            <button class="btn-sec" style="width:auto; margin:0;" onclick="openGroupManager()">管理</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 人设 -->
+                <h4 class="settings-header">人设</h4>
+                <div class="settings-section">
+                    <div class="input-group"><label>角色人设</label><textarea id="character-detail-description" rows="6" placeholder="角色的详细设定..."></textarea></div>
+                    <div class="input-group"><label>我的人设</label><textarea id="character-detail-user-persona" rows="4" placeholder="你希望AI如何看待你..."></textarea></div>
+                    <div class="input-group"><label>开场白</label><textarea id="character-detail-first-mes" rows="2" placeholder="角色第一次见面时说的话..."></textarea></div>
+                </div>
+
+                <!-- AI核心 -->
+                <h4 class="settings-header">AI 核心</h4>
+                <div class="settings-section">
+                    <div class="input-group">
+                        <label>关联世界书</label>
+                        <div id="character-linked-worldbooks" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; min-height:40px; border:1px solid rgba(0,0,0,0.1); border-radius:8px; padding:10px; background:var(--bg);"></div>
+                        <button class="btn btn-sec" style="margin-top:10px; width:auto; font-size:0.8rem;" onclick="selectWorldBooksForCharacter()">📚 选择/管理世界书</button>
+                    </div>
+                    <div class="input-group">
+                        <label>关联待办 Bingo 卡</label>
+                        <div id="character-linked-bingo-cards" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; min-height:40px; border:1px solid rgba(0,0,0,0.1); border-radius:8px; padding:10px; background:var(--bg);"></div>
+                        <button class="btn btn-sec" style="margin-top:10px; width:auto; font-size:0.8rem;" onclick="selectBingoCardsForCharacter()">🎯 选择/管理 Bingo 卡</button>
+                    </div>
+                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
+                        <label style="margin:0;">启用独立后台活动</label>
+                        <input type="checkbox" id="character-detail-bg-activity" style="width:auto;">
+                    </div>
+                    <div class="input-group"><label>独立行动冷却 (分钟)</label><input type="number" id="character-detail-bg-cooldown" value="120" min="1"></div>
+                    <div class="input-group">
+                        <label>上下文短期记忆条数</label>
+                        <input type="number" id="character-max-memory" value="20" min="5" max="100" oninput="updateTokenEstimate()">
+                        <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                            💡 每次AI调用发送最近N条对话作为上下文。太少会失忆，太多会浪费token且可能超限。建议：日常聊天20条，深度对话30-50条
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>世界书扫描深度</label>
+                        <input type="number" id="character-worldbook-scan-depth" value="10" min="1" max="50">
+                        <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                            💡 扫描最近N条消息来匹配世界书关键词。数值越大匹配范围越广，但可能激活不相关的条目。建议：5-15条
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>挂载记忆条数</label>
+                        <input type="number" id="character-detail-pinned-memory" value="0" min="0" max="20" oninput="updateTokenEstimate()">
+                        <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                            💡 从长期记忆库挂载最近N条到系统提示词中。设置过多会增加每次调用的token消耗。建议：0-5条
+                        </div>
+                    </div>
+                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
+                        <label style="margin:0;">自动总结长期记忆</label>
+                        <input type="checkbox" id="character-detail-auto-summary" style="width:auto;">
+                    </div>
+                    <div class="input-group"><label>自动总结间隔 (条)</label><input type="number" id="character-detail-summary-interval" value="10"></div>
+                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
+                        <label style="margin:0;">时间感知</label>
+                        <input type="checkbox" id="character-detail-time-awareness" style="width:auto;" checked>
+                    </div>
+                    <div class="input-group">
+                        <label>消息发送模式</label>
+                        <select id="character-detail-msg-mode">
+                            <option value="split">文本句子切分 (模拟日常多轮对话)</option>
+                            <option value="full">发送一段文本完整 String</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 外观 -->
+                <h4 class="settings-header">外观自定义</h4>
+                <div class="settings-section">
+                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
+                        <label style="margin:0;">聊天背景跟随主题</label>
+                        <input type="checkbox" id="character-detail-bg-follow" style="width:auto;" checked>
+                    </div>
+                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
+                        <label style="margin:0;">显示角色和用户头像</label>
+                        <input type="checkbox" id="character-detail-show-avatar" style="width:auto;" checked>
+                    </div>
+                    <div class="input-group">
+                        <label>聊天气泡字体大小 (px)</label>
+                        <input type="range" id="character-detail-bubble-size" min="12" max="20" value="14" step="1" oninput="document.getElementById('bubble-size-value').textContent = this.value + 'px'">
+                        <div style="text-align:right; font-size:0.8rem; opacity:0.7; margin-top:5px;">
+                            当前: <span id="bubble-size-value">14px</span>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label>用户消息气泡样式 (CSS)</label>
+                        <textarea id="character-detail-bubble-css-user" rows="4" placeholder="例如: background: linear-gradient(120deg, rgba(235, 226, 170, 0.85), rgba(200, 213, 197, 0.8)); border-radius: 18px 2px 18px 18px;"></textarea>
+                    </div>
+                    <div class="input-group">
+                        <label>角色消息气泡样式 (CSS)</label>
+                        <textarea id="character-detail-bubble-css-ai" rows="4" placeholder="例如: background: linear-gradient(135deg, rgba(225, 236, 244, 0.92), rgba(173, 196, 204, 0.85)); border-radius: 2px 18px 18px 18px;"></textarea>
+                    </div>
+
+                    <!-- 样式预设管理 -->
+                    <div class="input-group">
+                        <label>样式预设</label>
+                        <div style="display:flex; gap:5px; margin-bottom:10px;">
+                            <input type="text" id="bubble-preset-name" placeholder="预设名称" style="flex:1;">
+                            <button class="btn-sec" style="width:auto; padding:5px 12px; margin:0;" onclick="saveBubblePreset()">💾</button>
+                        </div>
+                        <select id="bubble-preset-select" onchange="loadBubblePreset()" style="margin-bottom:10px;">
+                            <option value="">选择预设</option>
+                        </select>
+                    </div>
+
+                    <!-- 效果预览 -->
+                    <div style="text-align:center; opacity:0.6; font-size:0.8rem; margin-bottom:10px;">- 效果预览 -</div>
+                    <div id="bubble-preview-container" style="padding:15px; background:var(--bg); border-radius:12px; border:1px solid rgba(0,0,0,0.1);">
+                        <div style="display:flex; justify-content:flex-end; margin-bottom:15px;">
+                            <div class="preview-bubble preview-bubble-user" style="max-width:70%; background:var(--accent); color:var(--bg); padding:12px 16px; border-radius:16px;">
+                                <div style="font-size:14px;">这是用户消息气泡</div>
+                            </div>
+                        </div>
+                        <div style="display:flex; justify-content:flex-start;">
+                            <div class="preview-bubble preview-bubble-char" style="max-width:70%; background:var(--card-bg); color:var(--text); padding:12px 16px; border-radius:16px; border-left:3px solid var(--accent);">
+                                <div style="font-size:14px;">这是角色消息气泡</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 记录管理 -->
+                <h4 class="settings-header">记录管理</h4>
+                <div class="settings-section">
+                    <div style="background:var(--bg); padding:12px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); margin-bottom:15px;">
+                        <div style="font-size:0.75rem; opacity:0.6; margin-bottom:8px;">📊 Token使用情况估算</div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:8px;">
+                            <span>当前对话总条数:</span>
+                            <b id="chat-message-count" style="color:var(--accent);">0</b>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:8px;">
+                            <span>每次发送条数:</span>
+                            <b id="context-limit-display" style="color:var(--accent);">20</b>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:8px;">
+                            <span>挂载长期记忆:</span>
+                            <b id="pinned-memory-display" style="color:var(--accent);">0</b>
+                        </div>
+                        <div style="border-top:1px dashed rgba(0,0,0,0.1); margin:8px 0; padding-top:8px;">
+                            <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
+                                <span>预估每次调用Token:</span>
+                                <b id="chat-token-estimate" style="color:var(--accent);">~0</b>
+                            </div>
+                            <div style="font-size:0.65rem; opacity:0.5; margin-top:5px;">
+                                💡 实际token取决于消息长度和模型。此为粗略估算：系统提示词~500 + 上下文条数×100 + 长期记忆×50
+                            </div>
+                        </div>
+                    </div>
+                    <div class="input-group"><input type="search" id="chat-search-input" placeholder="查找聊天记录..."><button class="btn btn-sec" onclick="searchChatHistory()">查找</button></div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <button class="btn btn-sec" onclick="exportChatHistory()">导出记录</button>
+                        <button class="btn btn-sec" onclick="importChatHistory()">导入记录</button>
+                    </div>
+                    <button class="btn btn-danger" style="margin-top:10px;" onclick="clearChatHistory()">清空聊天记录</button>
+                    <button class="btn btn-danger" style="margin-top:10px;" onclick="deleteCharacter()">删除此角色</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 选择世界书弹窗 -->
+    <div id="modal-select-worldbooks" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px;">选择世界书</h3>
+        <div id="worldbook-selection-list" style="max-height:400px; overflow-y:auto; margin-bottom:15px;">
+            <!-- 世界书复选框列表 -->
+        </div>
+        <button class="btn" onclick="confirmWorldBookSelection()">确认</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-select-worldbooks')">取消</button>
+    </div></div>
+
+    <!-- 选择Bingo卡弹窗 -->
+    <div id="modal-select-bingo" class="modal modal-on-top"><div class="sheet">
+        <h3 style="margin-bottom:15px;">选择关联的 Bingo 卡</h3>
+        <div id="bingo-selection-list" style="max-height:400px; overflow-y:auto; margin-bottom:15px;">
+            <!-- Bingo卡复选框列表 -->
+        </div>
+        <button class="btn" onclick="confirmBingoCardSelection()">确认</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-select-bingo')">取消</button>
+    </div></div>
+
+    <div id="panel-world-book-manager" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">📚 世界书</h3>
+                <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="showWorldBookOptions()">⚙️</button>
+            </div>
+
+            <!-- 分类筛选 -->
+            <div style="margin-bottom:15px; display:flex; gap:8px; flex-wrap:wrap;" id="worldbook-categories">
+                <div class="filter-chip active" onclick="filterWorldBooks('all', this)">全部</div>
+            </div>
+
+            <!-- 世界书列表 -->
+            <div id="worldbook-list" style="max-height:400px; overflow-y:auto; margin-bottom:15px;">
+                <div style="text-align:center; opacity:0.5; margin-top:50px;">暂无世界书</div>
+            </div>
+
+            <div style="display:flex; gap:10px;">
+                <button class="btn" style="flex:1;" onclick="createWorldBook()">📝 新建</button>
+                <button class="btn btn-sec" style="flex:1;" onclick="importWorldBook()">📥 导入</button>
+            </div>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <!-- 世界书选项菜单 -->
+    <div id="modal-worldbook-options" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px;">世界书管理</h3>
+        <button class="btn" onclick="openCategoryManager()">🏷️ 管理分类</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="exportAllWorldBooks()">📤 导出全部</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-worldbook-options')">关闭</button>
+    </div></div>
+
+    <!-- 角色选择弹窗（用于分享归档） -->
+    <div id="modal-select-character" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">📤 选择分享对象</h3>
+        <p style="font-size:0.8rem; opacity:0.7; margin-bottom:15px;">选择一个角色来分享这个 Bingo 归档</p>
+        <div id="character-select-list" style="max-height:300px; overflow-y:auto; margin-bottom:15px;">
+            <!-- 角色列表会动态渲染 -->
+        </div>
+        <button class="btn btn-sec" onclick="closeModal('modal-select-character')">取消</button>
+    </div></div>
+
+    <!-- 分类管理器 -->
+    <div id="modal-category-manager" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px;">分类管理</h3>
+        <div class="input-group">
+            <label>新建分类</label>
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="new-category-name" placeholder="输入分类名称">
+                <button class="btn" style="width:auto; padding:10px 20px;" onclick="createCategory()">添加</button>
+            </div>
+        </div>
+        <div id="category-list" style="max-height:300px; overflow-y:auto; margin-top:15px;">
+            <!-- 分类列表 -->
+        </div>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-category-manager')">关闭</button>
+    </div></div>
+
+    <!-- 创建/编辑世界书 -->
+    <div id="modal-edit-worldbook" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px;" id="worldbook-edit-title">新建世界书</h3>
+        <div class="input-group">
+            <label>世界书名称</label>
+            <input type="text" id="worldbook-name" placeholder="例如：奇幻大陆设定">
+        </div>
+        <div class="input-group">
+            <label>分类</label>
+            <select id="worldbook-category">
+                <option value="">无分类</option>
+            </select>
+        </div>
+        <div class="input-group">
+            <label>描述（可选）</label>
+            <textarea id="worldbook-description" rows="3" placeholder="简短描述这个世界书的内容"></textarea>
+        </div>
+        <button class="btn" onclick="saveWorldBook()">保存</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-edit-worldbook')">取消</button>
+    </div></div>
+
+    <!-- 世界书详情/条目管理 -->
+    <div id="modal-worldbook-detail" class="modal"><div class="sheet">
+        <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0;" id="worldbook-detail-title">世界书</h3>
+            <div style="display:flex; gap:8px;">
+                <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="editCurrentWorldBook()">✏️</button>
+                <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="deleteCurrentWorldBook()">🗑️</button>
+            </div>
+        </div>
+
+        <!-- 条目列表 -->
+        <div id="worldbook-entries-list" style="max-height:350px; overflow-y:auto; margin-bottom:15px;">
+            <div style="text-align:center; opacity:0.5; margin-top:30px;">暂无条目</div>
+        </div>
+
+        <button class="btn" onclick="createWorldBookEntry()">➕ 新建条目</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-worldbook-detail')">关闭</button>
+    </div></div>
+
+    <!-- 创建/编辑条目 -->
+    <div id="modal-edit-entry" class="modal"><div class="sheet">
+        <h3 style="margin-bottom:15px;" id="entry-edit-title">新建条目</h3>
+        <div class="input-group">
+            <label>条目名称</label>
+            <input type="text" id="entry-name" placeholder="例如：艾尔登王国">
+        </div>
+
+        <!-- 触发模式选择器 -->
+        <div class="input-group">
+            <label>触发模式</label>
+            <input type="hidden" id="entry-trigger-mode" value="keyword">
+            <div style="display:flex; gap:8px;">
+                <button type="button" id="trigger-always-btn" class="btn-sec" style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="setTriggerMode('always')">
+                    <span style="width:12px; height:12px; border-radius:50%; background:#2196F3; box-shadow:0 0 6px #2196F3;"></span>
+                    <span>常驻</span>
+                </button>
+                <button type="button" id="trigger-keyword-btn" class="btn-sec active" style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="setTriggerMode('keyword')">
+                    <span style="width:12px; height:12px; border-radius:50%; background:#4CAF50; box-shadow:0 0 6px #4CAF50;"></span>
+                    <span>关键词</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>关键词（用英文逗号分隔）</label>
+            <input type="text" id="entry-keys" placeholder="例如：王国,艾尔登,首都">
+            <div id="entry-keys-hint" style="font-size:0.7rem; opacity:0.6; margin-top:5px;">绿灯关键词模式：当对话中出现这些关键词时，该条目才会被激活</div>
+        </div>
+        <div class="input-group">
+            <label>内容</label>
+            <textarea id="entry-content" rows="8" placeholder="详细描述这个条目的内容..."></textarea>
+        </div>
+        <div class="input-group" style="display:flex; align-items:center; gap:10px; margin-bottom:0;">
+            <label style="margin:0; flex:1;">启用条目</label>
+            <input type="checkbox" id="entry-enabled" checked style="width:auto;">
+        </div>
+        <button class="btn" onclick="saveWorldBookEntry()">保存</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-edit-entry')">取消</button>
+    </div></div>
+
+    <div id="panel-background-activity" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">🔄 后台活动</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="margin-bottom:0;">启用后台活动</label>
+                <input type="checkbox" id="bg-activity-enabled" onchange="toggleBgActivityCharacterList()">
+            </div>
+            <div class="input-group">
+                <label>检测间隔(分钟)</label>
+                <input type="number" id="bg-activity-interval" min="1" value="60">
+            </div>
+
+            <!-- 角色列表勾选 -->
+            <div id="bg-activity-character-list-container" style="display:none;">
+                <div class="input-group">
+                    <label>选择参与后台活动的角色</label>
+                    <div id="bg-activity-character-list" style="max-height:300px; overflow-y:auto; border:1px solid rgba(0,0,0,0.1); border-radius:8px; padding:10px; background:var(--bg);">
+                        <!-- 角色复选框列表 -->
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn" onclick="saveBackgroundActivitySettings()">保存设置</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <div id="panel-cloud-backup" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">☁️ 云备份</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <p style="font-size:0.8rem; opacity:0.7; margin-bottom:15px;">将数据备份到GitHub私有仓库</p>
+            <div class="input-group">
+                <label>GitHub用户名</label>
+                <input type="text" id="github-username" placeholder="yourname">
+            </div>
+            <div class="input-group">
+                <label>仓库名</label>
+                <input type="text" id="github-repo" placeholder="my-backup">
+            </div>
+            <div class="input-group">
+                <label>Personal Access Token</label>
+                <input type="password" id="github-token" placeholder="ghp_...">
+            </div>
+            <div id="cloud-backup-progress" style="display:none; margin-bottom:15px; padding:12px; background:var(--bg); border-radius:8px; border:1px solid rgba(0,0,0,0.1);">
+                <div style="font-size:0.8rem; margin-bottom:8px;" id="cloud-backup-status">准备中...</div>
+                <div style="height:6px; background:rgba(0,0,0,0.1); border-radius:3px; overflow:hidden;">
+                    <div id="cloud-backup-bar" style="height:100%; background:var(--accent); border-radius:3px; transition:width 0.3s; width:0%;"></div>
+                </div>
+            </div>
+            <button class="btn" onclick="saveCloudBackupSettings('upload')">上传备份</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="saveCloudBackupSettings('download')">恢复备份</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <div id="panel-ai-settings" class="sidebar-panel modal" style="align-items: flex-start; background: var(--bg);">
+        <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
+            <div class="header" style="background:var(--card-bg); padding:15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
+                <span class="back-btn" style="font-size:1.5rem; cursor:pointer;" onclick="closeAiSettings()">←</span>
+                <h3 style="margin:0; color:var(--accent);">AI设置</h3>
+                <span style="width:30px;"></span>
+            </div>
+
+            <div style="padding: 20px; flex: 1; overflow-y: auto;">
+                <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
+                    <label style="margin-bottom:0;">启用后台活动</label>
+                    <input type="checkbox" id="ai-bg-activity-enabled">
+                </div>
+                <div class="input-group">
+                    <label>后台活动检测间隔 (分钟)</label>
+                    <input type="number" id="ai-bg-activity-interval" min="1" value="60">
+                </div>
+                <hr style="margin:20px 0; opacity:0.3;">
+
+                <div class="input-group">
+                    <label>上下文条数 (0=无限制)</label>
+                    <input type="number" id="ai-context-limit" min="0" max="9999" value="50" step="10">
+                    <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">控制AI记忆多少条历史消息。设为0表示发送全部聊天记录（注意token消耗）</div>
+                </div>
+
+                <div class="input-group">
+                    <label>关联待办 Bingo 卡</label>
+                    <div id="ai-linked-bingo-cards" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; min-height:40px; border:1px solid rgba(0,0,0,0.1); border-radius:8px; padding:10px; background:var(--bg);"></div>
+                    <button class="btn btn-sec" style="margin-top:10px; width:auto; font-size:0.8rem;" onclick="selectBingoCardsForAI()">🎯 选择/管理 Bingo 卡</button>
+                </div>
+
+                <button class="btn" onclick="saveAiSettings()">保存设置</button>
+                <hr style="margin:20px 0; opacity:0.3;">
+
+                <h4 style="margin-bottom:10px; color:var(--accent);">聊天记录管理</h4>
+                <button class="btn btn-sec" onclick="clearAllChat()">🗑️ 清空所有记录</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="panel-data-manager" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">📊 数据管理</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <button class="btn" onclick="exportData()">📤 导出所有数据</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="triggerImport('merge')">📥 导入数据(增量)</button>
+            <button class="btn btn-danger" style="margin-top:10px;" onclick="triggerImport('overwrite')">📥 导入数据(覆盖)</button>
+            <hr style="margin:20px 0; opacity:0.3;">
+            <button class="btn btn-danger" onclick="if(confirm('确定清空所有数据?')) { localStorage.clear(); location.reload(); }">⚠️ 初始化所有内容</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <!-- LifeOS 图书馆全屏界面 -->
+    <div id="library-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:6000; flex-direction:column;">
+        <!-- 图书馆头部 -->
+        <div style="background:var(--card-bg); padding:15px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink:0;">
+            <span style="font-size:1.5rem; cursor:pointer;" onclick="closeLibrary()">←</span>
+            <h2 style="margin:0; color:var(--accent); font-size:1.2rem;">图书馆</h2>
+            <span style="width:30px;"></span>
+        </div>
+
+        <!-- 图书馆主内容区 -->
+        <div id="library-main-content" style="flex:1; overflow-y:auto; padding:15px;">
+            <!-- 阅读室视图 -->
+            <div id="library-reading-room" class="library-tab-content">
+                <div class="library-empty" style="text-align:center; padding:40px 20px;">
+                    <div style="font-size:2.5rem; opacity:0.2; margin-bottom:15px;">💬</div>
+                    <p style="opacity:0.6; font-size:0.9rem;">暂无阅读室</p>
+                    <p style="font-size:0.75rem; opacity:0.4; margin-top:8px;">点击书籍阅读后可创建讨论室</p>
+                </div>
+                <div id="reading-room-list"></div>
+            </div>
+
+            <!-- 书架视图 -->
+            <div id="library-bookshelf" class="library-tab-content" style="display:none;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h3 style="margin:0; font-size:1rem;">书架</h3>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-sec" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openLibCategoryManager()">分类</button>
+                        <button class="btn-sec" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="openImportBookModal()">+ 导入</button>
+                    </div>
+                </div>
+
+                <!-- 分组管理 -->
+                <div id="library-categories" style="margin-bottom:20px;">
+                    <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:15px;" id="category-chips">
+                        <div class="filter-chip active" data-category-id="all" onclick="filterBooksByCategory('all', this)">全部</div>
+                    </div>
+                </div>
+
+                <!-- 书籍列表 -->
+                <div id="bookshelf-list">
+                    <div class="library-empty" style="text-align:center; padding:40px 20px;">
+                        <div style="font-size:2.5rem; opacity:0.2; margin-bottom:15px;">📚</div>
+                        <p style="opacity:0.6; font-size:0.9rem;">书架空空如也</p>
+                        <button class="btn" style="margin-top:15px;" onclick="openImportBookModal()">导入书籍</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 个人视图 -->
+            <div id="library-personal" class="library-tab-content" style="display:none;">
+                <h3 style="margin-bottom:15px; font-size:1rem;">我的笔记</h3>
+                <div id="personal-notes-list">
+                    <div class="library-empty" style="text-align:center; padding:30px 20px;">
+                        <div style="font-size:2rem; opacity:0.2; margin-bottom:10px;">📝</div>
+                        <p style="opacity:0.5; font-size:0.85rem;">暂无笔记</p>
+                    </div>
+                </div>
+
+                <h3 style="margin:30px 0 15px; font-size:1rem;">读完的书</h3>
+                <div id="finished-books-list">
+                    <div class="library-empty" style="text-align:center; padding:30px 20px;">
+                        <div style="font-size:2rem; opacity:0.2; margin-bottom:10px;">✓</div>
+                        <p style="opacity:0.5; font-size:0.85rem;">还没有读完的书</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图书馆底部导航 -->
+        <div style="background:var(--card-bg); display:grid; grid-template-columns:repeat(3,1fr); padding:10px 0; border-top:1px solid rgba(0,0,0,0.05); flex-shrink:0; padding-bottom:max(10px, env(safe-area-inset-bottom));">
+            <div class="library-nav-item active" data-lib-tab="reading-room" onclick="switchLibraryTab('reading-room', this)">
+                <span style="font-size:1.2rem;">💬</span>
+                <span style="font-size:0.7rem; margin-top:3px;">讨论</span>
+            </div>
+            <div class="library-nav-item" data-lib-tab="bookshelf" onclick="switchLibraryTab('bookshelf', this)">
+                <span style="font-size:1.2rem;">📚</span>
+                <span style="font-size:0.7rem; margin-top:3px;">书架</span>
+            </div>
+            <div class="library-nav-item" data-lib-tab="personal" onclick="switchLibraryTab('personal', this)">
+                <span style="font-size:1.2rem;">📝</span>
+                <span style="font-size:0.7rem; margin-top:3px;">笔记</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入书籍弹窗 -->
+    <div id="modal-import-book" class="modal" style="z-index:6500;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">导入书籍</h3>
+        <div class="input-group">
+            <label>书名</label>
+            <input type="text" id="import-book-title" placeholder="请输入书名">
+        </div>
+        <div class="input-group">
+            <label>选择文件 (支持 .txt / .epub)</label>
+            <input type="file" id="import-book-file" accept=".txt,.epub" style="padding:8px;">
+        </div>
+        <div class="input-group">
+            <label>分组（可选）</label>
+            <select id="import-book-category">
+                <option value="">默认</option>
+            </select>
+        </div>
+        <button class="btn" onclick="importBookFile()">开始导入</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-import-book')">取消</button>
+    </div></div>
+
+    <!-- 沉浸式阅读器 -->
+    <div id="reader-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:7000; flex-direction:column;">
+        <!-- 阅读器顶部工具栏 (默认隐藏) -->
+        <div id="reader-top-bar" class="reader-toolbar" style="position:fixed; top:-60px; left:0; width:100%; background:var(--card-bg); padding:15px; display:flex; align-items:center; justify-content:space-between; box-shadow:var(--shadow); transition:top 0.3s; z-index:7001;">
+            <span style="font-size:1.5rem; cursor:pointer;" onclick="exitReader()">←</span>
+            <div style="flex:1; text-align:center;">
+                  <div id="reader-book-title" style="font-weight:bold; font-size:0.9rem; color:var(--accent);"></div>
+                  <div id="reader-progress-text" style="font-size:0.7rem; opacity:0.6; margin-top:2px;">0%</div>
+              </div>
+            <span style="font-size:1.2rem; cursor:pointer;" onclick="openReaderSettings()">⋮</span>
+        </div>
+
+        <!-- 阅读内容区 -->
+        <div id="reader-content" style="flex:1; overflow-y:auto; padding:20px; font-size:1rem; line-height:1.8; user-select:text; -webkit-user-select:text;">
+            <div style="text-align:center; padding:100px 20px; opacity:0.5;">
+                正在加载书籍内容...
+            </div>
+        </div>
+
+        <!-- 阅读器底部工具栏 (默认隐藏) -->
+        <div id="reader-bottom-bar" class="reader-toolbar" style="position:fixed; bottom:-200px; left:0; width:100%; background:var(--card-bg); padding:15px; box-shadow:0 -2px 10px rgba(0,0,0,0.1); transition:bottom 0.3s; z-index:7001;">
+            <!-- 工具按钮行 -->
+            <div style="display:flex; justify-content:space-around; align-items:center; margin-bottom:15px;">
+                <div class="reader-tool-btn" onclick="openReaderCatalog()" title="目录">
+                    <span style="font-size:1.1rem;">📑</span>
+                    <span style="font-size:0.7rem;">目录</span>
+                </div>
+                <div class="reader-tool-btn" onclick="openReaderNotes()" title="笔记">
+                    <span style="font-size:1.1rem;">📝</span>
+                    <span style="font-size:0.7rem;">笔记</span>
+                </div>
+                <div class="reader-tool-btn" onclick="openReaderProgress()" title="进度">
+                    <span style="font-size:1.1rem;">%</span>
+                    <span style="font-size:0.7rem;">进度</span>
+                </div>
+                <div class="reader-tool-btn" onclick="hardSnapReaderToPage()" title="对齐">
+                    <span style="font-size:1.1rem;">🧲</span>
+                    <span style="font-size:0.7rem;">对齐</span>
+                </div>
+                <div class="reader-tool-btn" onclick="openReaderFontSettings()" title="设置">
+                    <span style="font-size:1.1rem;">Aa</span>
+                    <span style="font-size:0.7rem;">字体</span>
+                </div>
+            </div>
+
+            <!-- 进度条 -->
+            <div style="margin-top:10px;">
+                <input type="range" id="reader-progress-slider" min="0" max="100" value="0" style="width:100%;" oninput="seekReaderProgress(this.value)">
+                <div style="display:flex; justify-content:space-between; font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                    <span id="reader-position-text">0</span>
+                    <span id="reader-total-text">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 悬浮窗按钮 -->
+        <div id="reader-float-btn" style="position:fixed; right:20px; bottom:140px; width:60px; height:60px; background:var(--accent); border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 15px rgba(0,0,0,0.3); cursor:pointer; z-index:7002;" onclick="toggleReaderFloatMenu()">
+            <span style="font-size:1.8rem; color:var(--bg);">💬</span>
+        </div>
+
+        <!-- 悬浮菜单 -->
+        <div id="reader-float-menu" style="display:none; position:fixed; right:20px; bottom:210px; background:var(--card-bg); border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px; z-index:7003; min-width:150px;">
+            <div class="reader-float-menu-item" onclick="createReadingRoomFromReader()">
+                <span>💬</span>
+                <span>创建阅读室</span>
+            </div>
+            <div id="existing-rooms-list"></div>
+        </div>
+
+        <div id="reader-page-indicator" style="position:fixed; right:16px; bottom:16px; background:rgba(0,0,0,0.4); color:#fff; padding:4px 8px; border-radius:10px; font-size:0.62rem; z-index:7002; display:none; pointer-events:none; letter-spacing:0.2px;">第 1 / 1 页</div>
+    </div>
+
+    <!-- 阅读器设置弹窗 -->
+    <div id="modal-reader-settings" class="modal" style="z-index:8000;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">阅读设置</h3>
+
+        <!-- 书签 -->
+        <div style="margin-bottom:20px;">
+            <h4 style="margin-bottom:10px; font-size:0.95rem;">书签</h4>
+            <button class="btn-sec" onclick="addBookmark()">+ 添加书签到当前位置</button>
+            <div id="bookmarks-list" style="margin-top:10px; max-height:150px; overflow-y:auto;"></div>
+        </div>
+
+        <!-- 全文搜索 -->
+        <div style="margin-bottom:20px;">
+            <h4 style="margin-bottom:10px; font-size:0.95rem;">全文搜索</h4>
+            <input type="text" id="reader-search-input" placeholder="输入关键词..." style="width:100%; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:8px;">
+            <button class="btn-sec" style="margin-top:10px;" onclick="searchInBook()">搜索</button>
+            <div id="search-results" style="margin-top:10px;"></div>
+        </div>
+
+        <!-- 记忆库 -->
+        <div style="margin-bottom:20px;">
+            <h4 style="margin-bottom:10px; font-size:0.95rem;">阅读记忆库</h4>
+            <p style="font-size:0.8rem; opacity:0.6; margin-bottom:10px;">AI 总结书中的人物、物品、剧情</p>
+            <button class="btn-sec" onclick="openMemoryTableManager()">管理记忆库</button>
+        </div>
+
+        <!-- 阅读室 AI 上下文设置 -->
+        <div style="margin-bottom:20px;">
+            <h4 style="margin-bottom:10px; font-size:0.95rem;">阅读室 AI 上下文</h4>
+            <p style="font-size:0.8rem; opacity:0.6; margin-bottom:10px;">从悬浮按钮进入聊天室时，AI 会同步阅读当前页面附近的内容</p>
+            <div class="input-group">
+                <label>当前位置前取段落数</label>
+                <input type="number" id="reading-ctx-before" min="0" max="10" value="3">
+            </div>
+            <div class="input-group">
+                <label>当前位置后取段落数</label>
+                <input type="number" id="reading-ctx-after" min="0" max="20" value="5">
+            </div>
+            <div class="input-group">
+                <label>最大字符数上限</label>
+                <input type="number" id="reading-ctx-max-chars" min="500" max="10000" step="500" value="3000">
+                <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">约 750 tokens / 3000 汉字。过大会增加 token 消耗。</div>
+            </div>
+            <button class="btn-sec" onclick="saveReadingContextConfig()">保存上下文设置</button>
+        </div>
+
+        <button class="btn btn-sec" onclick="closeModal('modal-reader-settings')">关闭</button>
+    </div></div>
+
+    <!-- 字体设置弹窗 -->
+    <div id="modal-reader-font" class="modal" style="z-index:8000;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">字体设置</h3>
+
+        <div class="input-group">
+            <label>字体大小</label>
+            <input type="range" id="reader-font-size" min="12" max="24" value="16" oninput="updateReaderFontSize(this.value)">
+            <span id="reader-font-size-display">16px</span>
+        </div>
+
+        <div class="input-group">
+            <label>行间距</label>
+            <input type="range" id="reader-line-height" min="1.2" max="2.5" step="0.1" value="1.8" oninput="updateReaderLineHeight(this.value)">
+            <span id="reader-line-height-display">1.8</span>
+        </div>
+
+        <div class="input-group">
+            <label>阅读模式</label>
+            <div style="display:flex; gap:10px;">
+                <button class="btn-sec active" id="btn-scroll-mode" onclick="setReaderMode('scroll')">滚动阅读</button>
+                <button class="btn-sec" id="btn-page-mode" onclick="setReaderMode('page')">翻页阅读</button>
+            </div>
+        </div>
+
+        <button class="btn btn-sec" onclick="closeModal('modal-reader-font')">关闭</button>
+    </div></div>
+
+    <!-- 阅读目录弹窗 -->
+    <div id="modal-reader-catalog" class="modal" style="z-index:8000;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">目录</h3>
+        <div id="reader-catalog-list" style="max-height:420px; overflow-y:auto;"></div>
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-reader-catalog')">关闭</button>
+    </div></div>
+
+    <!-- 阅读笔记弹窗 -->
+    <div id="modal-reader-notes" class="modal" style="z-index:8000;"><div class="sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0; color:var(--accent);">本书笔记</h3>
+            <button class="btn-sec" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="addManualReaderNote()">+ 手动添加</button>
+        </div>
+        <div id="reader-notes-list" style="max-height:420px; overflow-y:auto;"></div>
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-reader-notes')">关闭</button>
+    </div></div>
+
+    <!-- 阅读进度弹窗 -->
+    <div id="modal-reader-progress" class="modal" style="z-index:8000;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">阅读进度</h3>
+        <div id="reader-progress-info" style="font-size:0.85rem; opacity:0.7; margin-bottom:10px;"></div>
+        <input type="range" id="reader-progress-modal-slider" min="0" max="100" value="0" style="width:100%;" oninput="updateProgressFromModal(this.value)">
+        <div style="display:flex; justify-content:space-between; font-size:0.75rem; opacity:0.6; margin-top:5px;">
+            <span id="reader-progress-modal-value">0%</span>
+            <span>100%</span>
+        </div>
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-reader-progress')">关闭</button>
+    </div></div>
+
+    <!-- 阅读记忆库弹窗 -->
+    <div id="modal-book-memory" class="modal" style="z-index:8000;"><div class="sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0; color:var(--accent);">阅读记忆库</h3>
+            <button class="btn-sec" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="addBookMemoryEntry()">+ 手动添加</button>
+        </div>
+        <div class="input-group">
+            <label>类型</label>
+            <select id="book-memory-type" onchange="loadBookMemoryEntries()">
+                <option value="character">人物</option>
+                <option value="item">物品</option>
+                <option value="plot">剧情</option>
+            </select>
+        </div>
+        <div class="input-group">
+            <label>AI总结范围 (百分比)</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input type="number" id="book-memory-range-start" min="0" max="100" value="0" style="width:70px;">
+                <span style="opacity:0.6;">~</span>
+                <input type="number" id="book-memory-range-end" min="0" max="100" value="10" style="width:70px;">
+                <button class="btn-sec" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="summarizeBookRange()">AI总结</button>
+            </div>
+            <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">提示：范围过大会截断文本，建议每次 5-15%。</div>
+        </div>
+        <div id="book-memory-list" style="max-height:360px; overflow-y:auto;"></div>
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-book-memory')">关闭</button>
+    </div></div>
+
+    <!-- 笔记详情弹窗 -->
+    <div id="modal-note-detail" class="modal" style="z-index:8000;"><div class="sheet">
+        <h3 style="margin-bottom:10px; color:var(--accent);">笔记</h3>
+        <div id="note-detail-meta" style="font-size:0.75rem; opacity:0.6; margin-bottom:10px;"></div>
+        <!-- 原文摘录（只读） -->
+        <div id="note-detail-excerpt" style="display:none; margin-bottom:12px;">
+            <div style="font-size:0.75rem; opacity:0.5; margin-bottom:4px;">原文摘录</div>
+            <div id="note-detail-excerpt-text" style="font-size:0.85rem; padding:8px 12px; background:rgba(0,0,0,0.03); border-left:3px solid var(--accent); border-radius:0 6px 6px 0; color:var(--text); opacity:0.85; line-height:1.6; max-height:120px; overflow-y:auto;"></div>
+        </div>
+        <!-- 用户笔记（可编辑） -->
+        <div id="note-detail-usernote-section">
+            <div id="note-detail-usernote-label" style="font-size:0.75rem; opacity:0.5; margin-bottom:4px; display:none;">我的想法</div>
+            <div class="input-group">
+                <textarea id="note-detail-content" rows="4" placeholder="写下你的想法..."></textarea>
+            </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+            <button class="btn" onclick="saveNoteDetail()">保存修改</button>
+            <button class="btn btn-sec" onclick="sendNoteToChat()">发送到聊天</button>
+        </div>
+        <button class="btn btn-danger" onclick="deleteNoteDetail()">删除</button>
+        <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-note-detail')">关闭</button>
+    </div></div>
+
+    <!-- 书籍上下文菜单 -->
+    <div id="book-context-menu" class="context-menu">
+        <div class="context-menu-item" onclick="renameBook()">
+            <span>✏️</span>
+            <span>重命名</span>
+        </div>
+        <div class="context-menu-item" onclick="moveBookToCategory()">
+            <span>📁</span>
+            <span>移动到分组</span>
+        </div>
+        <div class="context-menu-item" style="color:#c62828;" onclick="deleteBook()">
+            <span>🗑️</span>
+            <span>删除</span>
+        </div>
+    </div>
+
+    <!-- 阅读室上下文菜单 -->
+    <div id="room-context-menu" class="context-menu">
+        <div class="context-menu-item" onclick="renameReadingRoom()">
+            <span>✏️</span>
+            <span>重命名</span>
+        </div>
+        <div class="context-menu-item" style="color:#c62828;" onclick="deleteReadingRoom()">
+            <span>🗑️</span>
+            <span>删除</span>
+        </div>
+    </div>
+
+    <!-- 移动到分组弹窗 -->
+    <div id="modal-move-to-category" class="modal" style="z-index:6500;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">移动到分组</h3>
+        <div id="category-list-for-move" style="max-height:300px; overflow-y:auto;">
+            <!-- 分组列表将动态生成 -->
+        </div>
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-move-to-category')">取消</button>
+    </div></div>
+
+    <!-- 图书馆分类管理弹窗 -->
+    <div id="modal-lib-category-manager" class="modal" style="z-index:6500;"><div class="sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0; color:var(--accent);">分类管理</h3>
+            <button class="btn-sec" style="width:auto; padding:6px 12px; font-size:0.8rem;" onclick="showAddCategoryInput()">+ 新建</button>
+        </div>
+
+        <!-- 新建分类输入框（默认隐藏） -->
+        <div id="lib-add-category-input" style="display:none; margin-bottom:15px;">
+            <div class="input-group">
+                <input type="text" id="new-lib-category-name" placeholder="输入分类名称..." style="margin-bottom:8px;">
+                <div style="display:flex; gap:8px;">
+                    <button class="btn-sec" style="flex:1;" onclick="cancelAddCategory()">取消</button>
+                    <button class="btn" style="flex:1;" onclick="confirmAddCategory()">确认</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分类列表 -->
+        <div id="lib-category-manager-list" style="max-height:400px; overflow-y:auto;">
+            <div style="text-align:center; padding:40px 20px; opacity:0.5; font-size:0.85rem;">
+                暂无分类
+            </div>
+        </div>
+
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-lib-category-manager')">关闭</button>
+    </div></div>
+
+    <!-- 阅读室角色选择弹窗 -->
+    <div id="modal-room-character-picker" class="modal" style="z-index:9500;"><div class="sheet">
+        <h3 style="margin-bottom:15px; color:var(--accent);">选择讨论角色</h3>
+        <p style="font-size:0.8rem; opacity:0.6; margin-bottom:15px;">选择一个角色加入阅读室进行书籍讨论</p>
+        <div id="room-character-list" style="max-height:400px; overflow-y:auto;">
+            <!-- 角色列表将动态生成 -->
+        </div>
+        <button class="btn btn-sec" style="margin-top:15px;" onclick="closeModal('modal-room-character-picker')">取消</button>
+    </div></div>
+
+    <!-- 长期记忆库弹窗 -->
+    <div id="modal-memory-library" class="modal"><div class="sheet">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="margin:0; color:var(--accent);">🧠 长期记忆库</h3>
+            <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.7rem;" onclick="addManualMemory()">+ 手动添加</button>
+        </div>
+        <p style="font-size:0.8rem; opacity:0.6; margin-bottom:15px;">由副模型自动归纳或手动记录的记忆节点。</p>
+        <div id="memory-library-list" style="max-height:400px; overflow-y:auto; margin-bottom:20px; font-size:0.85rem; line-height:1.6;"></div>
+        <button class="btn btn-sec" onclick="closeModal('modal-memory-library')">关闭</button>
+    </div></div>
+
+    <!-- 角色聊天全屏界面 -->
+    <div id="character-chat-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:5000; flex-direction:column;">
+        <!-- 聊天头部 -->
+        <div style="background:var(--card-bg); padding:15px; display:flex; align-items:center; gap:15px; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow);">
+            <span style="font-size:1.5rem; cursor:pointer;" onclick="closeCharacterChat()">←</span>
+            <img id="chat-avatar" src="" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
+            <div style="flex:1;">
+                <div id="chat-character-name" style="font-weight:bold; font-size:1rem; color:var(--accent);"></div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div id="chat-status-text" style="font-size:0.7rem; opacity:0.6;">在线</div>
+                    <div id="chat-message-counter" style="font-size:0.7rem; opacity:0.6; color:var(--accent);">(0条)</div>
+                </div>
+            </div>
+    <span style="font-size:1.2rem; cursor:pointer; margin-right:15px; color:#2196F3;" onclick="openMemoryLibrary()" title="长期记忆库">🧠</span>
+    <span style="font-size:1.2rem; cursor:pointer; margin-right:15px; color:#FF9800;" onclick="toggleHistoryCollapse()" title="折叠/展开历史" id="chat-collapse-btn">📋</span>
+    <span id="reading-spoiler-toggle" style="font-size:1.1rem; cursor:pointer; margin-right:15px; color:#8E24AA; display:none;" onclick="toggleReadingSpoilerMode()" title="阅读状态：初读模式">🚫</span>
+    <span style="font-size:1.2rem; cursor:pointer;" onclick="openCharacterSettingsFromChat()">⚙️</span>
+</div>
+
+        <!-- 聊天消息区域 -->
+        <div id="character-chat-messages" style="flex:1; overflow-y:auto; overflow-x:hidden; padding:15px; display:flex; flex-direction:column; gap:15px;">
+            <div style="text-align:center; opacity:0.5; margin-top:100px;">暂无消息</div>
+        </div>
+        
+        <!-- 状态提示条 -->
+        <div id="character-chat-status-bar" style="padding: 5px 15px; font-size: 0.75rem; color: var(--accent); display: none; text-align: center; background: rgba(0,0,0,0.02);"></div>
+
+        <!-- 消息输入区域 -->
+        <div style="background:var(--card-bg); border-top:1px solid rgba(0,0,0,0.1); display:flex; flex-direction:column;">
+            
+            <!-- 战术工具栏 (Tactical Toolbar) -->
+            <div class="chat-toolbar" style="display:flex; gap:15px; padding:8px 12px; border-bottom:1px dashed rgba(0,0,0,0.1); background:var(--card-bg);">
+                
+                <div class="tool-icon" onclick="toolSendBingo()" title="注入任务数据">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <line x1="3" y1="9" x2="21" y2="9"></line>
+                        <line x1="9" y1="21" x2="9" y2="9"></line>
+                    </svg>
+                </div>
+
+                <div class="tool-icon" onclick="document.getElementById('img-upload').click()" title="视觉信号">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M21 12c0 1.66-4 8-9 8s-9-6.34-9-8 4-8 9-8 9 6.34 9 8z"></path>
+                    </svg>
+                    <input type="file" id="img-upload" accept="image/*" multiple style="display:none" onchange="toolSendImage(this)">
+                </div>
+
+                <div class="tool-icon" onclick="toolRollDice()" title="决策辅助">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 22h20L12 2z"></path> <circle cx="12" cy="16" r="1.5" fill="currentColor" stroke="none"></circle> </svg>
+                </div>
+
+                <div class="tool-icon" onclick="toolSendStatus()" title="生物状态">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 12l10 10 10-10L12 2z"></path>
+                    </svg>
+                </div>
+                
+                <div class="tool-icon" onclick="toolSendLink()" title="发送链接">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                         <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                         <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                    </svg>
+                </div>
+
+                <div id="search-toggle-btn" class="tool-icon" onclick="smartWebSearch('character')" title="联网搜索 (智能)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                </div>
+
+                <div id="local-search-btn" class="tool-icon" onclick="smartLocalSearch('character')" title="地点搜索 (智能)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                        <circle cx="12" cy="10" r="3"></circle>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 引用预览区域 -->
+            <div id="quote-preview" class="quote-preview">
+                <div id="quote-preview-content" style="font-size:0.85rem; opacity:0.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:30px;"></div>
+                <button class="quote-preview-close" onclick="clearQuotePreview()">×</button>
+            </div>
+
+            <div style="padding:10px 15px 15px; display:flex; gap:10px; align-items:flex-end;">
+                <button id="character-ai-reply-btn" style="width:40px; height:40px; border-radius:50%; background:var(--card-bg); border:1px solid var(--accent); color:var(--accent); font-size:1.2rem; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex-shrink:0;" onclick="triggerCharacterAIResponse()" title="让AI回复">✨</button>
+                <textarea id="character-chat-input" placeholder="输入消息... (回车换行)" style="flex:1; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:15px; resize:none; max-height:100px; font-family:inherit; background:var(--bg); color:var(--text); min-height:40px;"></textarea>
+                <button id="character-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.2rem; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0;" onclick="sendCharacterMessage()">↑</button>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.88/dist/epub.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
