@@ -11409,14 +11409,18 @@ ${taskList}
                 const computed = window.getComputedStyle(contentEl);
                 const paddingLeft = parseFloat(computed.paddingLeft) || 0;
                 const paddingRight = parseFloat(computed.paddingRight) || 0;
-                const rawWidth = contentEl.clientWidth - paddingLeft - paddingRight;
-                const dpr = window.devicePixelRatio || 1;
-                const contentWidth = Math.max(1, Math.ceil(rawWidth * dpr) / dpr);
+                const totalPadding = paddingLeft + paddingRight;
+                // 内容宽度 = 可视宽度 - 左右 padding
+                const rawWidth = contentEl.clientWidth - totalPadding;
+                // 像素对齐：向下取整到整数像素，避免亚像素导致的列偏移
+                const contentWidth = Math.max(1, Math.floor(rawWidth));
                 const height = contentEl.clientHeight || contentEl.offsetHeight;
 
-                // 使用单列分页
+                // column-gap 设为总 padding 值，这样:
+                // 滚动步长 = columnWidth + columnGap = contentWidth + totalPadding = clientWidth
+                // 每次翻页恰好滚动一个完整视口，不会看到相邻页的文字
                 contentEl.style.columnWidth = `${contentWidth}px`;
-                contentEl.style.columnGap = '0px';
+                contentEl.style.columnGap = `${totalPadding}px`;
                 contentEl.style.height = height ? `${height}px` : '';
                 contentEl.style.overflowX = 'auto';
                 contentEl.style.overflowY = 'hidden';

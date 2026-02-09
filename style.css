@@ -1439,8 +1439,9 @@
             overflow-x: auto !important;
             overflow-y: hidden !important;
             column-fill: auto;
-            column-gap: 0;
+            /* column-gap 由 JS 动态设置 = 左右 padding 之和 */
             scroll-behavior: smooth;
+            scroll-snap-type: x mandatory;
             word-break: break-word;
             overflow-wrap: anywhere;
             hyphens: auto;
