@@ -32,13 +32,13 @@
 
     <!-- 顶部状态栏 -->
     <div class="status-bar">
-        <span class="menu-btn" onclick="toggleSidebar()">☰</span>
+        <span class="menu-btn" onclick="toggleSidebar()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></span>
         <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
             <div class="app-name">Tara's LifeOS Chronos BinGO</div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
             <div style="display:flex; align-items:center; gap:8px;">
-                <span id="network-indicator" style="font-size:12px; cursor:help;" title="网络状态">🟢</span>
+                <span id="network-indicator" style="cursor:help; display:flex; align-items:center;" title="网络状态"><svg class="icon" style="width:12px;height:12px;fill:var(--completed);stroke:var(--completed);" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg></span>
                 <div class="sys-clock" id="sys-clock">00:00</div>
             </div>
             <div class="balance-pill">
@@ -55,7 +55,7 @@
     <div id="sidebar">
         <div class="sidebar-header">
             <h2> 控制台</h2>
-            <span class="sidebar-close" onclick="closeSidebar()">×</span>
+            <span class="sidebar-close" onclick="closeSidebar()"><svg class="icon" style="width:24px;height:24px;stroke:var(--bg);" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></span>
         </div>
         <div class="sidebar-content">
             <div class="sidebar-menu-item" onclick="openSidebarPanel('ai-assistant')">
@@ -63,32 +63,32 @@
                 <span>AI助手</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('api-config')">
-                <span class="menu-icon">⚙️</span>
-                <span>API设置</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>
+                <span>系统设置</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('character-manager')">
-                <span class="menu-icon">📇</span>
-                <span>信息管理</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></span>
+                <span>角色管理</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('world-book-manager')">
-                <span class="menu-icon">📚</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg></span>
                 <span>世界书</span>
             </div>
             <div class="sidebar-menu-item" onclick="openLibraryPanel()">
-                <span class="menu-icon">📖</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg></span>
                 <span>图书馆</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('background-activity')">
-                <span class="menu-icon">🔄</span>
-                <span>后台活动</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></span>
+                <span>后台进程</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('cloud-backup')">
-                <span class="menu-icon">☁️</span>
-                <span>云备份</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg></span>
+                <span>云端同步</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('data-manager')">
-                <span class="menu-icon">📊</span>
-                <span>数据管理</span>
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg></span>
+                <span>数据归档</span>
             </div>
         </div>
     </div>
@@ -147,7 +147,7 @@
     <div id="view-stats" class="view container">
         <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
             <button class="btn-sec" id="btn-refresh" style="font-size:0.75rem; padding:6px 15px; border-radius:20px; border:1px solid rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; background:var(--card-bg);" onclick="manualRefresh()">
-                <span>↻</span> 同步数据流
+                <svg class="icon" style="width:14px;height:14px;margin-right:5px;" viewBox="0 0 24 24"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> 同步数据流
             </button>
         </div>
         <div class="vesper-comment" id="vesper-report">...</div>
@@ -333,15 +333,29 @@
         <button class="btn" onclick="createProject()">启动</button>
     </div>
 
-    <!-- 底部导航 -->
+    <!-- 底部导航：Vesper 矢量版 -->
     <div class="nav-bar">
-        <div class="nav-item active" id="nav-calendar" onclick="switchTab('calendar')"><span class="nav-icon">📅</span><span>日历</span></div>
-        <div class="nav-item" id="nav-focus" onclick="switchTab('focus')"><span class="nav-icon">🎯</span><span>焦点</span></div>
-        <div class="nav-item" id="nav-create-tab" onclick="switchTab('create')">
-            <div class="add-icon-circle">+</div>
+        <div class="nav-item active" id="nav-calendar" onclick="switchTab('calendar')">
+            <span class="nav-icon"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>
+            <span>日历</span>
         </div>
-        <div class="nav-item" id="nav-shop" onclick="switchTab('shop')"><span class="nav-icon">🛒</span><span>商店</span></div>
-        <div class="nav-item" id="nav-stats" onclick="switchTab('stats')"><span class="nav-icon">📊</span><span>数据</span></div>
+        <div class="nav-item" id="nav-focus" onclick="switchTab('focus')">
+            <span class="nav-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="2" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="22" y2="12"></line></svg></span>
+            <span>焦点</span>
+        </div>
+        <div class="nav-item" id="nav-create-tab" onclick="switchTab('create')">
+            <div class="add-icon-circle">
+                <svg class="icon" style="color:var(--bg); width:28px; height:28px;" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </div>
+        </div>
+        <div class="nav-item" id="nav-shop" onclick="switchTab('shop')">
+            <span class="nav-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg></span>
+            <span>商店</span>
+        </div>
+        <div class="nav-item" id="nav-stats" onclick="switchTab('stats')">
+            <span class="nav-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></svg></span>
+            <span>数据</span>
+        </div>
     </div>
 
     <!-- 弹窗: 生物状态报告 -->
@@ -655,7 +669,7 @@
         <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
             <!-- 聊天头部 -->
             <div style="background:var(--card-bg); padding:15px; display:flex; align-items:center; gap:15px; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
-                <span style="font-size:1.5rem; cursor:pointer;" onclick="closePanelBack()">←</span>
+                <span style="cursor:pointer;" onclick="closePanelBack()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></span>
                 <img src="data:image/webp;base64,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BMYhcYBdTRiotB9FDxps/nyt5rEjV0jT6upGRixAXTfAU/lGADFIpGAXU1ATGIXGAXU1ATGH9CpA0wtLIxMT0Yc+YvWvJTzB47pjEXkyrKigfkgwi20zupqAmMQuMAupqAmMQpr1JY6OrZFCzdbZeiQNMxgDrKqagLGAy3tqzK5i4wC6moCYxC4wC6moCYwdn7mZ6lXVDTJZzwtNS5Q2LmiuAp/AtwviLbTO6moCYxC4wC6moCYxC4vR8BQM9Q3+WbfjbxFqSwFIoRQPyQYRbaZ3U1ATGIXGAXU1ATGIXGAXECt9wvaACrrBI1iPKF3Bzvi6g67HcD8ftM7qagJjELjALqagJjELjALqW68wgvSFAAWUU+/E8rqP6U9uX5XMXGAXU1ATGIXGAXU1ATGIXGAXFr0dagtFpnyKKK9vAXU1ATGIXGAXU1ATGIXGAXU1ATGIU1hF0ZmVCr4xiPifHsp/AqeI7qagJjELjALqagJjELjALqagJjELckbDlD6/BdVvkHE37i4BXmMQuMAupqAmMQuMAupqAmMQuMAupacsyaeun2iOslrFUop8L/E8rmLjALqagJjELjALqagJjELjALpsIaJ1/1srmKYF81RFndTUBMYhcYBdTUBMYhcYBdTUBMYhcX/bxQgo6Q7DiSmz9cqF1NQExiFxgF1NQExiFxgF1NQExiFxgFxAiz65u6ulM6ILb8WIF1NQExiFxgF1NQExiFxgF1NQExiFxgFxIu+w+j4iEMj/80BP5XMXGAXU1ATGIXGAXU1ATGIXGAXU1ATFRpFEKex14PS7gdATY0QuMAupqAmMQuMAupqAmMQuMAupqAmMQpw7OGEFzmy15jELjALqagJjELjALqagJjELjALqagJjCAXpRX477VmVzFxgF1NQExiFxgF1NQExiFxgF1NQExh/MrY4JzV/xw3OzupqAmMQuMAupqAmMQuMAupqAmMQuMAupori8omUXpt+8yuYuMAupqAmMQuMAupqAmMQuMAupqAmMP9yV7Feel0s6zMrmLjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJioAAP7FzQAAAAAAAAAAAAAABdGJPp1NV+zG2bLCQXvIX5kF2Jbm4aNgxXXPsRu5JXnFJbB69pUT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" style="width:40px; height:40px; border-radius:50%; object-fit:cover;">
                 <div style="flex:1;">
                     <div style="font-weight:bold; font-size:1rem; color:var(--accent);" id="ai-conversation-title">Vesper AI</div>
@@ -741,9 +755,9 @@
 
                 <!-- 输入框 -->
                 <div style="padding:10px 15px 15px; display:flex; gap:10px; align-items:flex-end;">
-                    <button id="ai-reply-btn" style="width:40px; height:40px; border-radius:50%; background:var(--card-bg); border:1px solid var(--accent); color:var(--accent); font-size:1.2rem; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex-shrink:0; display:none;" onclick="triggerAiAssistantResponse()" title="让AI回复">✨</button>
+                    <button id="ai-reply-btn" style="width:40px; height:40px; border-radius:50%; background:var(--card-bg); border:1px solid var(--accent); color:var(--accent); cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex-shrink:0; display:none; align-items:center; justify-content:center;" onclick="triggerAiAssistantResponse()" title="让AI回复"><svg class="icon" style="width:20px;height:20px;" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></button>
                     <textarea id="ai-input" placeholder="输入消息... (Shift+Enter 换行)" style="flex:1; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:15px; resize:none; max-height:100px; font-family:inherit; background:var(--bg); color:var(--text); min-height:40px;" onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendAiUserMessage(); }"></textarea>
-                    <button id="ai-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.2rem; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0;" onclick="sendAiUserMessage()">↑</button>
+                    <button id="ai-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0; display:flex; align-items:center; justify-content:center;" onclick="sendAiUserMessage()"><svg class="icon" style="width:20px;height:20px;stroke:var(--bg);" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
                 </div>
             </div>
         </div>
@@ -957,7 +971,7 @@
     <div id="modal-character-detail" class="modal" style="align-items: flex-start; background: var(--bg);">
         <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
             <div class="header" style="background:var(--card-bg); padding:15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
-                <span class="back-btn" style="font-size:1.5rem; cursor:pointer;" onclick="closeSettingsAndReturnToChat()">←</span>
+                <span class="back-btn" style="cursor:pointer;" onclick="closeSettingsAndReturnToChat()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></span>
                 <h3 style="margin:0; color:var(--accent);">角色设置</h3>
                 <div style="display:flex; gap:8px;">
                      <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="saveCharacterFullInfo()">保存</button>
@@ -1380,7 +1394,7 @@
     <div id="panel-ai-settings" class="sidebar-panel modal" style="align-items: flex-start; background: var(--bg);">
         <div class="sheet" style="width: 100%; height: 100%; border-radius: 0; display: flex; flex-direction: column; padding: 0;">
             <div class="header" style="background:var(--card-bg); padding:15px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink: 0;">
-                <span class="back-btn" style="font-size:1.5rem; cursor:pointer;" onclick="closeAiSettings()">←</span>
+                <span class="back-btn" style="cursor:pointer;" onclick="closeAiSettings()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></span>
                 <h3 style="margin:0; color:var(--accent);">AI设置</h3>
                 <span style="width:30px;"></span>
             </div>
@@ -1437,7 +1451,7 @@
     <div id="library-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:6000; flex-direction:column;">
         <!-- 图书馆头部 -->
         <div style="background:var(--card-bg); padding:15px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow); flex-shrink:0;">
-            <span style="font-size:1.5rem; cursor:pointer;" onclick="closeLibrary()">←</span>
+            <span style="cursor:pointer;" onclick="closeLibrary()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></span>
             <h2 style="margin:0; color:var(--accent); font-size:1.2rem;">图书馆</h2>
             <span style="width:30px;"></span>
         </div>
@@ -1504,15 +1518,15 @@
         <!-- 图书馆底部导航 -->
         <div style="background:var(--card-bg); display:grid; grid-template-columns:repeat(3,1fr); padding:10px 0; border-top:1px solid rgba(0,0,0,0.05); flex-shrink:0; padding-bottom:max(10px, env(safe-area-inset-bottom));">
             <div class="library-nav-item active" data-lib-tab="reading-room" onclick="switchLibraryTab('reading-room', this)">
-                <span style="font-size:1.2rem;">💬</span>
+                <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
                 <span style="font-size:0.7rem; margin-top:3px;">讨论</span>
             </div>
             <div class="library-nav-item" data-lib-tab="bookshelf" onclick="switchLibraryTab('bookshelf', this)">
-                <span style="font-size:1.2rem;">📚</span>
+                <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg></span>
                 <span style="font-size:0.7rem; margin-top:3px;">书架</span>
             </div>
             <div class="library-nav-item" data-lib-tab="personal" onclick="switchLibraryTab('personal', this)">
-                <span style="font-size:1.2rem;">📝</span>
+                <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></span>
                 <span style="font-size:0.7rem; margin-top:3px;">笔记</span>
             </div>
         </div>
@@ -1543,12 +1557,12 @@
     <div id="reader-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:7000; flex-direction:column;">
         <!-- 阅读器顶部工具栏 (默认隐藏) -->
         <div id="reader-top-bar" class="reader-toolbar" style="position:fixed; top:-60px; left:0; width:100%; background:var(--card-bg); padding:15px; display:flex; align-items:center; justify-content:space-between; box-shadow:var(--shadow); transition:top 0.3s; z-index:7001;">
-            <span style="font-size:1.5rem; cursor:pointer;" onclick="exitReader()">←</span>
+            <span style="cursor:pointer;" onclick="exitReader()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></span>
             <div style="flex:1; text-align:center;">
                   <div id="reader-book-title" style="font-weight:bold; font-size:0.9rem; color:var(--accent);"></div>
                   <div id="reader-progress-text" style="font-size:0.7rem; opacity:0.6; margin-top:2px;">0%</div>
               </div>
-            <span style="font-size:1.2rem; cursor:pointer;" onclick="openReaderSettings()">⋮</span>
+            <span style="cursor:pointer;" onclick="openReaderSettings()"><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg></span>
         </div>
 
         <!-- 阅读内容区 -->
@@ -1563,23 +1577,23 @@
             <!-- 工具按钮行 -->
             <div style="display:flex; justify-content:space-around; align-items:center; margin-bottom:15px;">
                 <div class="reader-tool-btn" onclick="openReaderCatalog()" title="目录">
-                    <span style="font-size:1.1rem;">📑</span>
+                    <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg></span>
                     <span style="font-size:0.7rem;">目录</span>
                 </div>
                 <div class="reader-tool-btn" onclick="openReaderNotes()" title="笔记">
-                    <span style="font-size:1.1rem;">📝</span>
+                    <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></span>
                     <span style="font-size:0.7rem;">笔记</span>
                 </div>
                 <div class="reader-tool-btn" onclick="openReaderProgress()" title="进度">
-                    <span style="font-size:1.1rem;">%</span>
+                    <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>
                     <span style="font-size:0.7rem;">进度</span>
                 </div>
                 <div class="reader-tool-btn" onclick="hardSnapReaderToPage()" title="对齐">
-                    <span style="font-size:1.1rem;">🧲</span>
+                    <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><polyline points="4 14 10 14 10 20"></polyline><polyline points="20 10 14 10 14 4"></polyline><line x1="14" y1="10" x2="21" y2="3"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg></span>
                     <span style="font-size:0.7rem;">对齐</span>
                 </div>
                 <div class="reader-tool-btn" onclick="openReaderFontSettings()" title="设置">
-                    <span style="font-size:1.1rem;">Aa</span>
+                    <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg></span>
                     <span style="font-size:0.7rem;">字体</span>
                 </div>
             </div>
@@ -1596,13 +1610,13 @@
 
         <!-- 悬浮窗按钮 -->
         <div id="reader-float-btn" style="position:fixed; right:20px; bottom:140px; width:60px; height:60px; background:var(--accent); border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 15px rgba(0,0,0,0.3); cursor:pointer; z-index:7002;" onclick="toggleReaderFloatMenu()">
-            <span style="font-size:1.8rem; color:var(--bg);">💬</span>
+            <svg class="icon" style="width:28px;height:28px;stroke:var(--bg);" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
         </div>
 
         <!-- 悬浮菜单 -->
         <div id="reader-float-menu" style="display:none; position:fixed; right:20px; bottom:210px; background:var(--card-bg); border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px; z-index:7003; min-width:150px;">
             <div class="reader-float-menu-item" onclick="createReadingRoomFromReader()">
-                <span>💬</span>
+                <span><svg class="icon" style="width:18px;height:18px;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
                 <span>创建阅读室</span>
             </div>
             <div id="existing-rooms-list"></div>
@@ -1858,7 +1872,7 @@
     <div id="character-chat-screen" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:var(--bg); z-index:5000; flex-direction:column;">
         <!-- 聊天头部 -->
         <div style="background:var(--card-bg); padding:15px; display:flex; align-items:center; gap:15px; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow);">
-            <span style="font-size:1.5rem; cursor:pointer;" onclick="closeCharacterChat()">←</span>
+            <span style="cursor:pointer;" onclick="closeCharacterChat()"><svg class="icon" style="width:24px;height:24px;" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg></span>
             <img id="chat-avatar" src="" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
             <div style="flex:1;">
                 <div id="chat-character-name" style="font-weight:bold; font-size:1rem; color:var(--accent);"></div>
@@ -1867,10 +1881,18 @@
                     <div id="chat-message-counter" style="font-size:0.7rem; opacity:0.6; color:var(--accent);">(0条)</div>
                 </div>
             </div>
-    <span style="font-size:1.2rem; cursor:pointer; margin-right:15px; color:#2196F3;" onclick="openMemoryLibrary()" title="长期记忆库">🧠</span>
-    <span style="font-size:1.2rem; cursor:pointer; margin-right:15px; color:#FF9800;" onclick="toggleHistoryCollapse()" title="折叠/展开历史" id="chat-collapse-btn">📋</span>
-    <span id="reading-spoiler-toggle" style="font-size:1.1rem; cursor:pointer; margin-right:15px; color:#8E24AA; display:none;" onclick="toggleReadingSpoilerMode()" title="阅读状态：初读模式">🚫</span>
-    <span style="font-size:1.2rem; cursor:pointer;" onclick="openCharacterSettingsFromChat()">⚙️</span>
+    <span class="tool-icon" style="margin-right:15px;" onclick="openMemoryLibrary()" title="长期记忆库">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path></svg>
+    </span>
+    <span class="tool-icon" style="margin-right:15px;" onclick="toggleHistoryCollapse()" title="折叠/展开历史" id="chat-collapse-btn">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M8 6h13"></path><path d="M8 12h13"></path><path d="M8 18h13"></path><path d="M3 6h.01"></path><path d="M3 12h.01"></path><path d="M3 18h.01"></path></svg>
+    </span>
+    <span class="tool-icon" id="reading-spoiler-toggle" style="margin-right:15px; display:none; color:var(--daily);" onclick="toggleReadingSpoilerMode()" title="阅读状态：初读模式">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+    </span>
+    <span class="tool-icon" onclick="openCharacterSettingsFromChat()" title="设置">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </span>
 </div>
 
         <!-- 聊天消息区域 -->
@@ -1943,9 +1965,9 @@
             </div>
 
             <div style="padding:10px 15px 15px; display:flex; gap:10px; align-items:flex-end;">
-                <button id="character-ai-reply-btn" style="width:40px; height:40px; border-radius:50%; background:var(--card-bg); border:1px solid var(--accent); color:var(--accent); font-size:1.2rem; cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex-shrink:0;" onclick="triggerCharacterAIResponse()" title="让AI回复">✨</button>
+                <button id="character-ai-reply-btn" style="width:40px; height:40px; border-radius:50%; background:var(--card-bg); border:1px solid var(--accent); color:var(--accent); cursor:pointer; box-shadow:0 2px 5px rgba(0,0,0,0.1); flex-shrink:0; display:flex; align-items:center; justify-content:center;" onclick="triggerCharacterAIResponse()" title="让AI回复"><svg class="icon" style="width:20px;height:20px;" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></button>
                 <textarea id="character-chat-input" placeholder="输入消息... (回车换行)" style="flex:1; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:15px; resize:none; max-height:100px; font-family:inherit; background:var(--bg); color:var(--text); min-height:40px;"></textarea>
-                <button id="character-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; font-size:1.2rem; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0;" onclick="sendCharacterMessage()">↑</button>
+                <button id="character-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0; display:flex; align-items:center; justify-content:center;" onclick="sendCharacterMessage()"><svg class="icon" style="width:20px;height:20px;stroke:var(--bg);" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
             </div>
         </div>
     </div>
