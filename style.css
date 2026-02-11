@@ -1387,6 +1387,94 @@
             white-space: nowrap;
         }
 
+        /* 笔记按书分组 - 手风琴 */
+        .note-book-group {
+            margin-bottom: 12px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--card-bg);
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(var(--accent-rgb), 0.1);
+        }
+        .note-book-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+            user-select: none;
+        }
+        .note-book-header:hover {
+            background: rgba(var(--accent-rgb), 0.05);
+        }
+        .note-book-header:active {
+            background: rgba(var(--accent-rgb), 0.1);
+        }
+        .note-book-header .arrow {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            opacity: 0.4;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            flex-shrink: 0;
+        }
+        .note-book-header.expanded .arrow {
+            transform: rotate(90deg);
+        }
+        .note-book-header .book-icon {
+            width: 20px;
+            height: 20px;
+            stroke: var(--accent);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            flex-shrink: 0;
+        }
+        .note-book-header .book-title {
+            flex: 1;
+            font-weight: bold;
+            font-size: 0.9rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+        .note-book-header .note-count {
+            font-size: 0.7rem;
+            opacity: 0.5;
+            flex-shrink: 0;
+            padding: 2px 8px;
+            background: rgba(var(--accent-rgb), 0.08);
+            border-radius: 10px;
+        }
+        .note-book-items {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .note-book-items.expanded {
+            max-height: 5000px;
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .note-book-items .note-item {
+            padding: 12px 15px;
+            border-top: 1px solid rgba(128, 128, 128, 0.1);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .note-book-items .note-item:hover {
+            background: rgba(var(--accent-rgb), 0.03);
+        }
+        .note-book-items .note-item:active {
+            background: rgba(var(--accent-rgb), 0.08);
+        }
+
         /* 阅读器工具栏 */
         .reader-toolbar {
             backdrop-filter: blur(10px);

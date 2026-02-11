@@ -10131,7 +10131,7 @@ ${taskList}
                     if (!parent.querySelector('.library-empty')) {
                         parent.insertAdjacentHTML('afterbegin', `
                             <div class="library-empty" style="text-align:center; padding:40px 20px;">
-                                <div style="font-size:2.5rem; opacity:0.2; margin-bottom:15px;">💬</div>
+                                <div style="margin-bottom:15px;"><svg class="icon" style="width:2.5rem;height:2.5rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
                                 <p style="opacity:0.6; font-size:0.9rem;">暂无阅读室</p>
                                 <p style="font-size:0.75rem; opacity:0.4; margin-top:8px;">点击书籍阅读后可创建讨论室</p>
                             </div>
@@ -10153,7 +10153,7 @@ ${taskList}
                     const char = room.characterId ? charMap[room.characterId] : null;
                     const avatarHtml = char && char.avatar
                         ? `<img class="reading-room-avatar" src="${char.avatar}" alt="${char.name}">`
-                        : `<div class="reading-room-avatar" style="background: linear-gradient(135deg, var(--accent), var(--highlight)); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">💬</div>`;
+                        : `<div class="reading-room-avatar" style="background: linear-gradient(135deg, var(--accent), var(--highlight)); display: flex; align-items: center; justify-content: center;"><svg class="icon" style="width:24px;height:24px;stroke:#fff;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>`;
                     const charName = char ? char.name : '未选择角色';
                     const msgCount = room.chatHistory ? room.chatHistory.length : 0;
 
@@ -10198,7 +10198,7 @@ ${taskList}
                 if (!books || books.length === 0) {
                     listEl.innerHTML = `
                         <div class="library-empty" style="text-align:center; padding:40px 20px;">
-                            <div style="font-size:2.5rem; opacity:0.2; margin-bottom:15px;">📚</div>
+                            <div style="margin-bottom:15px;"><svg class="icon" style="width:2.5rem;height:2.5rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg></div>
                             <p style="opacity:0.6; font-size:0.9rem;">书架空空如也</p>
                             <button class="btn" style="margin-top:15px;" onclick="openImportBookModal()">导入书籍</button>
                         </div>
@@ -10209,10 +10209,12 @@ ${taskList}
                 listEl.innerHTML = books.map(book => {
                     const progress = Math.min(100, Math.max(0, book.progress || 0));
                     const statusText = book.status === 'finished' ? '已读完' : '阅读中';
+                    const finishedBadge = book.status === 'finished' ? `<div style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(var(--accent-rgb),0.9);display:flex;align-items:center;justify-content:center;"><svg class="icon" style="width:12px;height:12px;stroke:#fff;stroke-width:3;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>` : '';
                     return `
                         <div class="book-card" data-book-id="${book.id}" onclick="openBook(this.dataset.bookId)">
-                            <div class="book-card-cover">
-                                <span style="font-size:1.5rem;">📕</span>
+                            <div class="book-card-cover" style="position:relative;">
+                                <svg class="icon" style="width:1.5rem;height:1.5rem;stroke:rgba(255,255,255,0.9);" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                                ${finishedBadge}
                             </div>
                             <div class="book-card-info">
                                 <div class="book-card-title">${book.title}</div>
@@ -10264,10 +10266,12 @@ ${taskList}
                 listEl.innerHTML = books.map(book => {
                     const progress = Math.min(100, Math.max(0, book.progress || 0));
                     const statusText = book.status === 'finished' ? '已读完' : '阅读中';
+                    const finishedBadge = book.status === 'finished' ? `<div style="position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:50%;background:rgba(var(--accent-rgb),0.9);display:flex;align-items:center;justify-content:center;"><svg class="icon" style="width:12px;height:12px;stroke:#fff;stroke-width:3;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>` : '';
                     return `
                         <div class="book-card" data-book-id="${book.id}" onclick="openBook(this.dataset.bookId)">
-                            <div class="book-card-cover">
-                                <span style="font-size:1.5rem;">📕</span>
+                            <div class="book-card-cover" style="position:relative;">
+                                <svg class="icon" style="width:1.5rem;height:1.5rem;stroke:rgba(255,255,255,0.9);" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                                ${finishedBadge}
                             </div>
                             <div class="book-card-info">
                                 <div class="book-card-title">${book.title}</div>
@@ -10298,69 +10302,119 @@ ${taskList}
                 // 预加载书籍信息用于显示书名
                 const allBooks = await dbHelper.safeToArray('libraryBooks', '书籍') || [];
                 const bookMap = {};
-                allBooks.forEach(b => { bookMap[b.id] = b.title; });
+                allBooks.forEach(b => { bookMap[b.id] = b; });
 
-                // 加载笔记列表
+                const svgBook = '<svg class="book-icon" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>';
+                const svgArrow = '<svg class="arrow" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+                const svgNotepad = '<svg class="icon" style="width:2rem;height:2rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+                const svgCheck = '<svg class="icon" style="width:20px;height:20px;stroke:var(--accent);" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+
+                // 加载笔记列表 - 按书分组
                 const notesListEl = document.getElementById('personal-notes-list');
                 if (notes && notes.length > 0) {
-                    notes.sort((a, b) => (b.createdDate || 0) - (a.createdDate || 0));
-                    notesListEl.innerHTML = notes.map(note => {
-                        const typeLabel = note.type === 'highlight' ? '划线' : '笔记';
-                        const bookTitle = bookMap[note.bookId] || '';
-                        const bookInfo = bookTitle ? `<span style="opacity:0.5; font-size:0.7rem; margin-left:6px;">《${escapeHtml(bookTitle)}》</span>` : '';
-                        const colorDot = note.type === 'highlight' && note.color
-                            ? `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${getHighlightCssColor(note.color)}; margin-left:6px;"></span>`
-                            : '';
+                    // 按 bookId 分组
+                    const grouped = {};
+                    notes.forEach(note => {
+                        const bid = note.bookId || 'unknown';
+                        if (!grouped[bid]) grouped[bid] = [];
+                        grouped[bid].push(note);
+                    });
 
-                        // 原文摘录
-                        const excerptText = note.selectionText || '';
-                        const excerptHtml = excerptText
-                            ? `<div style="font-size:0.83rem; margin-top:6px; padding:6px 10px; background:rgba(0,0,0,0.03); border-left:3px solid var(--accent); border-radius:0 6px 6px 0; color:var(--text); opacity:0.85; max-height:60px; overflow-y:auto; line-height:1.5;">${escapeHtml(excerptText.substring(0, 200))}${excerptText.length > 200 ? '...' : ''}</div>`
-                            : '';
+                    // 每组内按时间排序
+                    Object.values(grouped).forEach(group => {
+                        group.sort((a, b) => (b.createdDate || 0) - (a.createdDate || 0));
+                    });
 
-                        // 用户笔记
-                        let userNoteHtml = '';
-                        if (note.type === 'note') {
-                            const userNote = note.userNote || '';
-                            if (userNote) {
-                                userNoteHtml = `
-                                    <div style="font-size:0.7rem; opacity:0.5; margin-top:6px;">我的想法</div>
-                                    <div style="font-size:0.83rem; padding:6px 10px; border-left:3px dashed var(--highlight); border-radius:0 6px 6px 0; font-style:italic; max-height:60px; overflow-y:auto; line-height:1.5;">${escapeHtml(userNote.substring(0, 200))}${userNote.length > 200 ? '...' : ''}</div>
-                                `;
-                            } else if (!excerptText && note.content) {
-                                userNoteHtml = `<div style="font-size:0.83rem; margin-top:6px; line-height:1.5;">${escapeHtml(note.content.substring(0, 200))}${note.content.length > 200 ? '...' : ''}</div>`;
+                    // 按最新笔记时间排序书本分组
+                    const sortedBookIds = Object.keys(grouped).sort((a, b) => {
+                        const latestA = grouped[a][0]?.createdDate || 0;
+                        const latestB = grouped[b][0]?.createdDate || 0;
+                        return latestB - latestA;
+                    });
+
+                    notesListEl.innerHTML = sortedBookIds.map(bookId => {
+                        const bookNotes = grouped[bookId];
+                        const book = bookMap[bookId];
+                        const bookTitle = book ? book.title : '未知书籍';
+                        const noteCount = bookNotes.length;
+
+                        const notesHtml = bookNotes.map(note => {
+                            const typeLabel = note.type === 'highlight' ? '划线' : '笔记';
+                            const colorDot = note.type === 'highlight' && note.color
+                                ? `<span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${getHighlightCssColor(note.color)}; margin-left:6px;"></span>`
+                                : '';
+
+                            const excerptText = note.selectionText || '';
+                            const excerptHtml = excerptText
+                                ? `<div style="font-size:0.83rem; margin-top:6px; padding:6px 10px; background:rgba(0,0,0,0.03); border-left:3px solid var(--accent); border-radius:0 6px 6px 0; color:var(--text); opacity:0.85; max-height:60px; overflow-y:auto; line-height:1.5;">${escapeHtml(excerptText.substring(0, 200))}${excerptText.length > 200 ? '...' : ''}</div>`
+                                : '';
+
+                            let userNoteHtml = '';
+                            if (note.type === 'note') {
+                                const userNote = note.userNote || '';
+                                if (userNote) {
+                                    userNoteHtml = `
+                                        <div style="font-size:0.7rem; opacity:0.5; margin-top:6px;">我的想法</div>
+                                        <div style="font-size:0.83rem; padding:6px 10px; border-left:3px dashed var(--highlight); border-radius:0 6px 6px 0; font-style:italic; max-height:60px; overflow-y:auto; line-height:1.5;">${escapeHtml(userNote.substring(0, 200))}${userNote.length > 200 ? '...' : ''}</div>
+                                    `;
+                                } else if (!excerptText && note.content) {
+                                    userNoteHtml = `<div style="font-size:0.83rem; margin-top:6px; line-height:1.5;">${escapeHtml(note.content.substring(0, 200))}${note.content.length > 200 ? '...' : ''}</div>`;
+                                }
                             }
-                        }
+
+                            return `
+                                <div class="note-item" onclick="viewNote(${note.id})">
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <div style="font-weight:bold; font-size:0.85rem; display:flex; align-items:center;">${typeLabel}${colorDot}</div>
+                                        <div style="font-size:0.7rem; opacity:0.5;">${new Date(note.createdDate).toLocaleDateString()}</div>
+                                    </div>
+                                    ${excerptHtml}
+                                    ${userNoteHtml}
+                                </div>
+                            `;
+                        }).join('');
 
                         return `
-                            <div class="mini-card" style="cursor:pointer; margin-bottom:10px;" onclick="viewNote(${note.id})">
-                                <div style="display:flex; justify-content:space-between; align-items:center;">
-                                    <div style="font-weight:bold; display:flex; align-items:center;">${typeLabel}${colorDot}${bookInfo}</div>
-                                    <div style="font-size:0.7rem; opacity:0.6;">${new Date(note.createdDate).toLocaleDateString()}</div>
+                            <div class="note-book-group">
+                                <div class="note-book-header" onclick="toggleBookNotes(this)">
+                                    ${svgArrow}
+                                    ${svgBook}
+                                    <div class="book-title">${escapeHtml(bookTitle)}</div>
+                                    <span class="note-count">${noteCount}条</span>
                                 </div>
-                                ${excerptHtml}
-                                ${userNoteHtml}
+                                <div class="note-book-items">
+                                    ${notesHtml}
+                                </div>
                             </div>
                         `;
                     }).join('');
                 } else {
                     notesListEl.innerHTML = `
                         <div class="library-empty" style="text-align:center; padding:30px 20px;">
-                            <div style="font-size:2rem; opacity:0.2; margin-bottom:10px;">📝</div>
+                            <div style="margin-bottom:10px;">${svgNotepad}</div>
                             <p style="opacity:0.5; font-size:0.85rem;">暂无笔记</p>
                         </div>
                     `;
                 }
 
-                // 加载已读完书籍
+                // 加载已读完书籍 - 手风琴折叠
                 const finishedListEl = document.getElementById('finished-books-list');
                 if (finishedBooks && finishedBooks.length > 0) {
+                    const svgArrowF = '<svg class="arrow" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>';
                     finishedListEl.innerHTML = finishedBooks.map(book => `
-                        <div class="mini-card" style="cursor:pointer;" onclick="openBook(${book.id})">
-                            <div>
-                                <div style="font-weight:bold;">✅ ${book.title}</div>
-                                <div style="font-size:0.7rem; opacity:0.6; margin-top:3px;">
-                                    完成于 ${new Date(book.lastReadDate).toLocaleDateString()}
+                        <div class="note-book-group">
+                            <div class="note-book-header" onclick="toggleBookNotes(this)">
+                                ${svgArrowF}
+                                ${svgCheck}
+                                <div class="book-title">${escapeHtml(book.title)}</div>
+                            </div>
+                            <div class="note-book-items">
+                                <div class="note-item" style="display:flex; justify-content:space-between; align-items:center;">
+                                    <div>
+                                        <div style="font-size:0.8rem; opacity:0.6;">完成于 ${new Date(book.lastReadDate).toLocaleDateString()}</div>
+                                        <div style="font-size:0.75rem; opacity:0.4; margin-top:4px;">进度 ${Math.round(book.progress || 100)}%</div>
+                                    </div>
+                                    <button class="btn-sec" style="width:auto; padding:6px 14px; font-size:0.8rem;" onclick="event.stopPropagation(); openBook(${book.id})">继续阅读</button>
                                 </div>
                             </div>
                         </div>
@@ -10368,7 +10422,7 @@ ${taskList}
                 } else {
                     finishedListEl.innerHTML = `
                         <div class="library-empty" style="text-align:center; padding:30px 20px;">
-                            <div style="font-size:2rem; opacity:0.2; margin-bottom:10px;">✅</div>
+                            <div style="margin-bottom:10px;"><svg class="icon" style="width:2rem;height:2rem;opacity:0.2;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
                             <p style="opacity:0.5; font-size:0.85rem;">还没有读完的书</p>
                         </div>
                     `;
@@ -10376,6 +10430,19 @@ ${taskList}
 
             } catch (error) {
                 handleError(error, '加载个人数据失败', ErrorLevel.ERROR);
+            }
+        }
+
+        // 笔记分组 折叠/展开
+        function toggleBookNotes(headerEl) {
+            const itemsEl = headerEl.nextElementSibling;
+            const isExpanded = headerEl.classList.contains('expanded');
+            if (isExpanded) {
+                headerEl.classList.remove('expanded');
+                itemsEl.classList.remove('expanded');
+            } else {
+                headerEl.classList.add('expanded');
+                itemsEl.classList.add('expanded');
             }
         }
 
@@ -10630,8 +10697,11 @@ ${taskList}
             for (const item of spineItems) {
                 try {
                     const contents = await item.load(book.load.bind(book));
-                    const doc = contents?.document || contents;
-                    const body = doc?.body || doc?.querySelector?.('body');
+                    const doc = contents?.document || contents?.ownerDocument || contents;
+                    let body = doc?.body || doc?.querySelector?.('body');
+                    // 某些 EPUB 返回的 contents 本身就是 body 或文档片段
+                    if (!body && doc?.nodeType === 1) body = doc;
+                    if (!body && contents?.nodeType === 1) body = contents;
                     if (!body) {
                         continue;
                     }
@@ -10680,6 +10750,44 @@ ${taskList}
                     console.warn('EPUB 章节解析失败:', error);
                 } finally {
                     if (item.unload) item.unload();
+                }
+            }
+
+            // 如果 epub.js spine 方式没提取到内容，使用 JSZip 直接解析 XHTML 文件
+            if (contentParagraphs.length === 0 && window.JSZip) {
+                console.warn('[EPUB] epub.js spine 未提取到内容，尝试 JSZip 直接解析');
+                try {
+                    const zip = await JSZip.loadAsync(arrayBuffer);
+                    const htmlExts = /\.(xhtml|html|htm|xml)$/i;
+                    const htmlFiles = Object.keys(zip.files)
+                        .filter(name => htmlExts.test(name) && !zip.files[name].dir)
+                        .sort();
+                    const parser = new DOMParser();
+                    for (const fileName of htmlFiles) {
+                        try {
+                            const text = await zip.files[fileName].async('string');
+                            const doc = parser.parseFromString(text, 'application/xhtml+xml');
+                            // 检查是否解析出错
+                            if (doc.querySelector('parsererror')) {
+                                const doc2 = parser.parseFromString(text, 'text/html');
+                                const body2 = doc2.body;
+                                if (body2) {
+                                    const { paragraphs } = extractEpubParagraphs(body2);
+                                    contentParagraphs.push(...paragraphs);
+                                }
+                            } else {
+                                const body = doc.body || doc.querySelector('body');
+                                if (body) {
+                                    const { paragraphs } = extractEpubParagraphs(body);
+                                    contentParagraphs.push(...paragraphs);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[EPUB] JSZip 解析文件失败:', fileName, e);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[EPUB] JSZip 回退解析失败:', e);
                 }
             }
 
@@ -10747,8 +10855,11 @@ ${taskList}
             if (!body) return { paragraphs, anchors, headings };
 
             const blockTags = new Set(['H1','H2','H3','H4','H5','H6','P','LI','BLOCKQUOTE','PRE']);
+            const containerTags = new Set(['DIV','SECTION','ARTICLE','ASIDE','MAIN','FIGURE','FIGCAPTION','DD','DT']);
+            const skipTags = new Set(['SCRIPT','STYLE','SVG','IMG','BR','HR','NAV','TABLE']);
             const pendingAnchors = [];
             let lastParagraphIndex = -1;
+            const processedNodes = new WeakSet();
 
             const pushAnchor = (id, index) => {
                 if (!id || index < 0) return;
@@ -10767,64 +10878,130 @@ ${taskList}
                 if (id) queueAnchor(id);
             };
 
-            const walker = body.ownerDocument && body.ownerDocument.createTreeWalker
-                ? body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_ELEMENT, null)
-                : null;
+            const addParagraph = (el, text) => {
+                const index = paragraphs.length;
+                paragraphs.push(text);
+                lastParagraphIndex = index;
+                if (el.tagName && el.tagName.startsWith('H')) {
+                    headings.push({ text, index });
+                }
+                if (pendingAnchors.length) {
+                    pendingAnchors.forEach(id => pushAnchor(id, index));
+                    pendingAnchors.length = 0;
+                }
+                const directId = el.getAttribute ? (el.getAttribute('id') || el.getAttribute('name')) : null;
+                pushAnchor(directId, index);
+                if (el.querySelectorAll) {
+                    const descendants = el.querySelectorAll('[id],[name]');
+                    descendants.forEach(desc => {
+                        const did = desc.getAttribute('id') || desc.getAttribute('name');
+                        pushAnchor(did, index);
+                    });
+                }
+            };
 
-            if (walker) {
-                let node = walker.currentNode;
-                while (node) {
-                    const el = node;
-                    collectIds(el);
+            // 检查元素是否含有块级子元素
+            const hasBlockChildren = (el) => {
+                if (!el.children) return false;
+                for (let i = 0; i < el.children.length; i++) {
+                    const tag = el.children[i].tagName;
+                    if (blockTags.has(tag) || containerTags.has(tag)) return true;
+                }
+                return false;
+            };
 
-                    if (blockTags.has(el.tagName)) {
+            // 标记所有祖先节点已处理（避免重复提取）
+            const markAncestors = (el) => {
+                let parent = el.parentElement;
+                while (parent && parent !== body) {
+                    processedNodes.add(parent);
+                    parent = parent.parentElement;
+                }
+            };
+
+            // 递归提取内容
+            const processNode = (el) => {
+                if (!el || !el.tagName) return;
+                if (skipTags.has(el.tagName)) return;
+                if (processedNodes.has(el)) return;
+
+                collectIds(el);
+
+                // 标准块级标签 - 直接提取
+                if (blockTags.has(el.tagName)) {
+                    processedNodes.add(el);
+                    const text = normalizeEpubText(el.textContent || '');
+                    if (text) {
+                        addParagraph(el, text);
+                        markAncestors(el);
+                    }
+                    return;
+                }
+
+                // 容器标签（div/section等）- 检查是否为叶子容器
+                if (containerTags.has(el.tagName)) {
+                    if (hasBlockChildren(el)) {
+                        // 有块级子元素，递归处理子元素
+                        for (let i = 0; i < el.children.length; i++) {
+                            processNode(el.children[i]);
+                        }
+                        // 处理完子元素后，检查是否有未被包裹的直接文本节点
+                        const directText = getDirectTextContent(el);
+                        if (directText) {
+                            processedNodes.add(el);
+                            addParagraph(el, directText);
+                        }
+                    } else {
+                        // 叶子容器，没有块级子元素 - 直接提取全部文本
+                        processedNodes.add(el);
                         const text = normalizeEpubText(el.textContent || '');
                         if (text) {
-                            const index = paragraphs.length;
-                            paragraphs.push(text);
-                            lastParagraphIndex = index;
-                            if (el.tagName && el.tagName.startsWith('H')) {
-                                headings.push({ text, index });
-                            }
-
-                            if (pendingAnchors.length) {
-                                pendingAnchors.forEach(id => pushAnchor(id, index));
-                                pendingAnchors.length = 0;
-                            }
-
-                            const directId = el.getAttribute('id') || el.getAttribute('name');
-                            pushAnchor(directId, index);
-
-                            // 覆盖标题内嵌锚点（如 <h2><a id="toc"></a>...）
-                            const descendants = el.querySelectorAll('[id],[name]');
-                            descendants.forEach(desc => {
-                                const did = desc.getAttribute('id') || desc.getAttribute('name');
-                                pushAnchor(did, index);
-                            });
+                            addParagraph(el, text);
+                            markAncestors(el);
                         }
                     }
-
-                    node = walker.nextNode();
+                    return;
                 }
-            } else {
-                const nodes = body.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,blockquote,pre');
-                nodes.forEach(node => {
-                    collectIds(node);
-                    const text = normalizeEpubText(node.textContent || '');
-                    if (!text) return;
-                    const index = paragraphs.length;
-                    paragraphs.push(text);
-                    lastParagraphIndex = index;
-                    if (node.tagName && node.tagName.startsWith('H')) {
-                        headings.push({ text, index });
+
+                // 其他标签：递归子节点
+                if (el.children && el.children.length > 0) {
+                    for (let i = 0; i < el.children.length; i++) {
+                        processNode(el.children[i]);
                     }
-                    if (pendingAnchors.length) {
-                        pendingAnchors.forEach(id => pushAnchor(id, index));
-                        pendingAnchors.length = 0;
+                }
+            };
+
+            // 获取元素的直接文本节点内容（排除已处理的子元素）
+            const getDirectTextContent = (el) => {
+                let text = '';
+                for (let i = 0; i < el.childNodes.length; i++) {
+                    const child = el.childNodes[i];
+                    if (child.nodeType === 3) { // TEXT_NODE
+                        text += child.textContent;
+                    } else if (child.nodeType === 1 && !processedNodes.has(child) &&
+                               !blockTags.has(child.tagName) && !containerTags.has(child.tagName)) {
+                        text += child.textContent || '';
                     }
-                    const directId = node.getAttribute('id') || node.getAttribute('name');
-                    pushAnchor(directId, index);
-                });
+                }
+                return normalizeEpubText(text);
+            };
+
+            // 从 body 开始递归处理
+            if (body.children && body.children.length > 0) {
+                for (let i = 0; i < body.children.length; i++) {
+                    processNode(body.children[i]);
+                }
+            }
+
+            // 如果递归方式未提取到内容，使用兜底策略：提取所有可见文本
+            if (paragraphs.length === 0) {
+                const allText = normalizeEpubText(body.textContent || '');
+                if (allText) {
+                    const lines = allText.split(/\n+/).filter(l => l.trim());
+                    lines.forEach(line => {
+                        addParagraph(body, line.trim());
+                    });
+                }
             }
 
             if (pendingAnchors.length && lastParagraphIndex >= 0) {
@@ -11343,11 +11520,62 @@ ${taskList}
         function openReaderSettings() {
             openModal('modal-reader-settings');
             loadBookmarks();
+            updateFinishedToggleUI();
             // 加载阅读上下文配置
             const rctx = store.readingContextConfig || { paragraphsBefore: 3, paragraphsAfter: 5, maxChars: 3000 };
             document.getElementById('reading-ctx-before').value = rctx.paragraphsBefore;
             document.getElementById('reading-ctx-after').value = rctx.paragraphsAfter;
             document.getElementById('reading-ctx-max-chars').value = rctx.maxChars;
+        }
+
+        // 已读完状态切换
+        async function toggleBookFinished() {
+            if (!currentBook) return;
+            try {
+                const isFinished = currentBook.status === 'finished';
+                const newStatus = isFinished ? 'reading' : 'finished';
+                const updateData = { status: newStatus, lastReadDate: Date.now() };
+                if (newStatus === 'finished') updateData.progress = 100;
+
+                await db.libraryBooks.update(currentBook.id, updateData);
+                currentBook.status = newStatus;
+                if (newStatus === 'finished') currentBook.progress = 100;
+
+                updateFinishedToggleUI();
+                if (typeof showToast === 'function') {
+                    showToast(newStatus === 'finished' ? '已标记为读完' : '已取消读完标记');
+                }
+            } catch (error) {
+                handleError(error, '更新阅读状态失败', ErrorLevel.ERROR);
+            }
+        }
+
+        function updateFinishedToggleUI() {
+            if (!currentBook) return;
+            const isFinished = currentBook.status === 'finished';
+            const toggle = document.getElementById('book-finished-toggle');
+            const icon = document.getElementById('finished-toggle-icon');
+            const label = document.getElementById('finished-toggle-label');
+            const sw = document.getElementById('finished-toggle-switch');
+            if (!toggle) return;
+
+            if (isFinished) {
+                toggle.style.background = 'rgba(var(--accent-rgb), 0.12)';
+                icon.style.stroke = 'var(--accent)';
+                label.textContent = '已读完';
+                label.style.fontWeight = 'bold';
+                label.style.color = 'var(--accent)';
+                sw.style.background = 'var(--accent)';
+                sw.firstElementChild.style.transform = 'translateX(18px)';
+            } else {
+                toggle.style.background = 'rgba(var(--accent-rgb), 0.05)';
+                icon.style.stroke = 'currentColor';
+                label.textContent = '标记为已读完';
+                label.style.fontWeight = 'normal';
+                label.style.color = 'inherit';
+                sw.style.background = 'rgba(128,128,128,0.3)';
+                sw.firstElementChild.style.transform = 'translateX(0)';
+            }
         }
 
         // 保存阅读上下文配置（独立于 AI 设置）
@@ -11605,28 +11833,75 @@ ${taskList}
         // 加载当前书籍的已有阅读室到悬浮菜单
         async function loadExistingRoomsInFloatMenu() {
             const listEl = document.getElementById('existing-rooms-list');
+            const otherListEl = document.getElementById('other-rooms-list');
             if (!listEl || !currentBook) return;
 
             try {
                 const allRooms = await dbHelper.safeToArray('readingRooms', '阅读室');
-                const bookRooms = allRooms ? allRooms.filter(r => r.bookId === currentBook.id) : [];
-
-                if (bookRooms.length === 0) {
+                if (!allRooms || allRooms.length === 0) {
                     listEl.innerHTML = '<div style="padding:8px 12px; font-size:0.75rem; opacity:0.4; text-align:center;">暂无阅读室</div>';
+                    if (otherListEl) otherListEl.innerHTML = '';
                     return;
                 }
 
-                listEl.innerHTML = bookRooms.map(room => `
-                    <div class="reader-float-menu-item" data-room-id="${room.id}" onclick="toggleReaderFloatMenu(); openReadingRoom(${room.id})">
-                        <span>💬</span>
-                        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${room.name}</span>
-                        <span style="font-size:0.7rem; opacity:0.4;">${room.chatHistory ? room.chatHistory.length : 0}条</span>
-                    </div>
-                `).join('');
+                const bookRooms = allRooms.filter(r => r.bookId === currentBook.id);
+                const otherRooms = allRooms.filter(r => r.bookId !== currentBook.id);
+
+                // 本书阅读室
+                if (bookRooms.length === 0) {
+                    listEl.innerHTML = '<div style="padding:8px 12px; font-size:0.75rem; opacity:0.4; text-align:center;">本书暂无阅读室</div>';
+                } else {
+                    listEl.innerHTML =
+                        '<div style="padding:6px 12px 2px; font-size:0.7rem; opacity:0.5; font-weight:600;">📖 本书阅读室</div>' +
+                        bookRooms.map(room => `
+                            <div class="reader-float-menu-item" data-room-id="${room.id}" onclick="toggleReaderFloatMenu(); openReadingRoom(${room.id})">
+                                <span>💬</span>
+                                <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${room.name}</span>
+                                <span style="font-size:0.7rem; opacity:0.4;">${room.chatHistory ? room.chatHistory.length : 0}条</span>
+                            </div>
+                        `).join('');
+                }
+
+                // 其他阅读室
+                if (otherListEl) {
+                    if (otherRooms.length === 0) {
+                        otherListEl.innerHTML = '';
+                    } else {
+                        const bookIds = [...new Set(otherRooms.map(r => r.bookId).filter(Boolean))];
+                        const bookTitleMap = {};
+                        for (const bid of bookIds) {
+                            try {
+                                const book = await dbHelper.safeGet('libraryBooks', bid, '书籍');
+                                bookTitleMap[bid] = book ? book.title : '未知书籍';
+                            } catch (e) {
+                                bookTitleMap[bid] = '未知书籍';
+                            }
+                        }
+
+                        otherRooms.sort((a, b) => (b.lastActiveDate || 0) - (a.lastActiveDate || 0));
+
+                        otherListEl.innerHTML =
+                            '<div style="border-top:1px solid rgba(128,128,128,0.2); margin:6px 0;"></div>' +
+                            '<div style="padding:6px 12px 2px; font-size:0.7rem; opacity:0.5; font-weight:600;">🔄 其他阅读室</div>' +
+                            otherRooms.map(room => {
+                                const bookTitle = bookTitleMap[room.bookId] || '未知书籍';
+                                return `
+                                <div class="reader-float-menu-item" data-room-id="${room.id}" onclick="toggleReaderFloatMenu(); openReadingRoom(${room.id}, true)">
+                                    <span>💬</span>
+                                    <div style="flex:1; overflow:hidden; min-width:0;">
+                                        <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${room.name}</div>
+                                        <div style="font-size:0.65rem; opacity:0.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">原书:《${bookTitle}》</div>
+                                    </div>
+                                    <span style="font-size:0.7rem; opacity:0.4;">${room.chatHistory ? room.chatHistory.length : 0}条</span>
+                                </div>`;
+                            }).join('');
+                    }
+                }
 
             } catch (error) {
                 console.error('[悬浮菜单] 加载阅读室列表失败:', error);
                 listEl.innerHTML = '';
+                if (otherListEl) otherListEl.innerHTML = '';
             }
         }
 
@@ -12151,17 +12426,34 @@ ${taskList}
                     return;
                 }
 
+                const svgBookmark = '<svg class="icon" style="width:14px;height:14px;stroke:var(--accent);" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>';
+                const svgTrash = '<svg class="icon" style="width:14px;height:14px;" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+
                 listEl.innerHTML = bookmarks.map((bm, index) => `
                     <div class="mini-card" style="cursor:pointer; margin-top:8px;" onclick="goToBookmark(${bm.position}, ${bm.percentage || 0}, '${bm.mode || 'scroll'}')">
-                        <div style="display:flex; justify-content:space-between;">
-                            <span style="font-size:0.85rem;">🔖 书签 ${index + 1}${bm.note ? ': ' + bm.note : ''}</span>
-                            <span style="font-size:0.7rem; opacity:0.6;">${new Date(bm.createdDate).toLocaleDateString()}</span>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:0.85rem; display:flex; align-items:center; gap:5px;">${svgBookmark} 书签 ${index + 1}${bm.note ? ': ' + escapeHtml(bm.note) : ''}</span>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:0.7rem; opacity:0.6;">${new Date(bm.createdDate).toLocaleDateString()}</span>
+                                <span style="opacity:0.4; padding:4px; border-radius:6px; transition:opacity 0.2s;" onclick="event.stopPropagation(); deleteBookmark(${bm.id})" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.4'">${svgTrash}</span>
+                            </div>
                         </div>
                     </div>
                 `).join('');
 
             } catch (error) {
                 handleError(error, '加载书签失败', ErrorLevel.ERROR);
+            }
+        }
+
+        async function deleteBookmark(bookmarkId) {
+            if (!confirm('确定要删除这个书签吗？')) return;
+            try {
+                await dbHelper.safeDelete('bookmarks', bookmarkId, '书签');
+                if (typeof showToast === 'function') showToast('书签已删除');
+                loadBookmarks();
+            } catch (error) {
+                handleError(error, '删除书签失败', ErrorLevel.ERROR);
             }
         }
 
@@ -12941,7 +13233,7 @@ ${taskList}
         }
 
         // 打开阅读室（集成角色聊天系统）
-        async function openReadingRoom(roomId) {
+        async function openReadingRoom(roomId, keepCurrentBook = false) {
             try {
                 const id = parseInt(roomId);
                 console.log('[阅读室] 打开 ID:', id);
@@ -12975,7 +13267,8 @@ ${taskList}
                 }
 
                 // 加载关联的书籍信息（用于上下文注入）
-                if (room.bookId && (!currentBook || currentBook.id !== room.bookId)) {
+                // keepCurrentBook=true 时保留当前正在阅读的书作为上下文（从阅读器进入其他书的阅读室）
+                if (!keepCurrentBook && room.bookId && (!currentBook || currentBook.id !== room.bookId)) {
                     const book = await dbHelper.safeGet('libraryBooks', room.bookId, '书籍');
                     if (book) currentBook = book;
                 }

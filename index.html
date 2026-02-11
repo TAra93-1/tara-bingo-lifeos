@@ -1461,7 +1461,7 @@
             <!-- 阅读室视图 -->
             <div id="library-reading-room" class="library-tab-content">
                 <div class="library-empty" style="text-align:center; padding:40px 20px;">
-                    <div style="font-size:2.5rem; opacity:0.2; margin-bottom:15px;">💬</div>
+                    <div style="margin-bottom:15px;"><svg class="icon" style="width:2.5rem;height:2.5rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
                     <p style="opacity:0.6; font-size:0.9rem;">暂无阅读室</p>
                     <p style="font-size:0.75rem; opacity:0.4; margin-top:8px;">点击书籍阅读后可创建讨论室</p>
                 </div>
@@ -1488,7 +1488,7 @@
                 <!-- 书籍列表 -->
                 <div id="bookshelf-list">
                     <div class="library-empty" style="text-align:center; padding:40px 20px;">
-                        <div style="font-size:2.5rem; opacity:0.2; margin-bottom:15px;">📚</div>
+                        <div style="margin-bottom:15px;"><svg class="icon" style="width:2.5rem;height:2.5rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg></div>
                         <p style="opacity:0.6; font-size:0.9rem;">书架空空如也</p>
                         <button class="btn" style="margin-top:15px;" onclick="openImportBookModal()">导入书籍</button>
                     </div>
@@ -1500,7 +1500,7 @@
                 <h3 style="margin-bottom:15px; font-size:1rem;">我的笔记</h3>
                 <div id="personal-notes-list">
                     <div class="library-empty" style="text-align:center; padding:30px 20px;">
-                        <div style="font-size:2rem; opacity:0.2; margin-bottom:10px;">📝</div>
+                        <div style="margin-bottom:10px;"><svg class="icon" style="width:2rem;height:2rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></div>
                         <p style="opacity:0.5; font-size:0.85rem;">暂无笔记</p>
                     </div>
                 </div>
@@ -1508,7 +1508,7 @@
                 <h3 style="margin:30px 0 15px; font-size:1rem;">读完的书</h3>
                 <div id="finished-books-list">
                     <div class="library-empty" style="text-align:center; padding:30px 20px;">
-                        <div style="font-size:2rem; opacity:0.2; margin-bottom:10px;">✓</div>
+                        <div style="margin-bottom:10px;"><svg class="icon" style="width:2rem;height:2rem;opacity:0.2;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
                         <p style="opacity:0.5; font-size:0.85rem;">还没有读完的书</p>
                     </div>
                 </div>
@@ -1614,12 +1614,13 @@
         </div>
 
         <!-- 悬浮菜单 -->
-        <div id="reader-float-menu" style="display:none; position:fixed; right:20px; bottom:210px; background:var(--card-bg); border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px; z-index:7003; min-width:150px;">
+        <div id="reader-float-menu" style="display:none; position:fixed; right:20px; bottom:210px; background:var(--card-bg); border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.3); padding:10px; z-index:7003; min-width:200px; max-height:60vh; overflow-y:auto;">
             <div class="reader-float-menu-item" onclick="createReadingRoomFromReader()">
                 <span><svg class="icon" style="width:18px;height:18px;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
-                <span>创建阅读室</span>
+                <span>+ 创建新阅读室</span>
             </div>
             <div id="existing-rooms-list"></div>
+            <div id="other-rooms-list"></div>
         </div>
 
         <div id="reader-page-indicator" style="position:fixed; right:16px; bottom:16px; background:rgba(0,0,0,0.4); color:#fff; padding:4px 8px; border-radius:10px; font-size:0.62rem; z-index:7002; display:none; pointer-events:none; letter-spacing:0.2px;">第 1 / 1 页</div>
@@ -1634,6 +1635,20 @@
             <h4 style="margin-bottom:10px; font-size:0.95rem;">书签</h4>
             <button class="btn-sec" onclick="addBookmark()">+ 添加书签到当前位置</button>
             <div id="bookmarks-list" style="margin-top:10px; max-height:150px; overflow-y:auto;"></div>
+        </div>
+
+        <!-- 阅读状态 -->
+        <div style="margin-bottom:20px;">
+            <h4 style="margin-bottom:10px; font-size:0.95rem;">阅读状态</h4>
+            <div id="book-finished-toggle" style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(var(--accent-rgb),0.05); border-radius:10px; cursor:pointer; transition:background 0.2s;" onclick="toggleBookFinished()">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <svg id="finished-toggle-icon" class="icon" style="width:20px;height:20px;" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    <span id="finished-toggle-label" style="font-size:0.9rem;">标记为已读完</span>
+                </div>
+                <div id="finished-toggle-switch" style="width:40px; height:22px; border-radius:11px; background:rgba(128,128,128,0.3); position:relative; transition:background 0.3s;">
+                    <div style="width:18px; height:18px; border-radius:50%; background:#fff; position:absolute; top:2px; left:2px; transition:transform 0.3s; box-shadow:0 1px 3px rgba(0,0,0,0.2);"></div>
+                </div>
+            </div>
         </div>
 
         <!-- 全文搜索 -->
