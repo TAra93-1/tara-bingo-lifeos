@@ -90,6 +90,37 @@
             --mystery-2: #C5E1A5;
         }
 
+        /* 6. 锈湖·根源 (Rusty Roots) - 腐烂的苔藓与旧羊皮纸 */
+        [data-theme="roots"] {
+            --bg: #2a1215;
+            --bg-rgb: 42, 18, 21;
+            --card-bg: #3d2022;
+            --text: #e3dccb;
+            --accent: #8c3b3b;
+            --accent-rgb: 140, 59, 59;
+            --highlight: #c45c5c;
+            --completed: #5c6b50;
+            --daily: #a09882;
+            --deadline: #c45c5c;
+            --gold: #b8a468;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            --mystery-1: #4a2828;
+            --mystery-2: #3d2022;
+        }
+        [data-theme="roots"] body,
+        [data-theme="roots"] .sheet,
+        [data-theme="roots"] .mini-card,
+        [data-theme="roots"] .cell,
+        [data-theme="roots"] h1, [data-theme="roots"] h2, [data-theme="roots"] h3, [data-theme="roots"] h4,
+        [data-theme="roots"] p, [data-theme="roots"] span, [data-theme="roots"] div, [data-theme="roots"] label {
+            font-family: 'Noto Serif SC', 'JetBrains Mono', serif !important;
+        }
+        [data-theme="roots"] .app-name,
+        [data-theme="roots"] .sys-clock,
+        [data-theme="roots"] .balance-pill {
+            font-family: 'JetBrains Mono', 'Noto Serif SC', serif !important;
+        }
+
         /* 全局平滑过渡 */
         body, .view, .mini-card, .btn, .status-bar, .nav-bar, .cell, input, select, textarea {
             transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease;
@@ -1987,6 +2018,7 @@ input:focus, textarea:focus, select:focus {
     margin-bottom: 2px !important;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -2277,4 +2309,152 @@ input[type="checkbox"]:checked::after {
 }
 [data-theme="silent"] .excerpt-block-content {
     color: var(--text);
+}
+
+/* =========================================
+   6. Roots (锈湖·根源): 腐烂苔藓、旧羊皮纸、干涸血迹
+   "The lake remembers everything."
+   ========================================= */
+[data-theme="roots"] .chat-message-bubble {
+    border-radius: 4px !important;
+    font-family: 'Noto Serif SC', serif;
+}
+[data-theme="roots"] .chat-message-bubble[data-msg-role="user"] {
+    background: #4a1e1e !important;
+    color: #e3dccb !important;
+    box-shadow: 2px 2px 0px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(140, 59, 59, 0.5);
+}
+[data-theme="roots"] .chat-message-bubble[data-msg-role="assistant"] {
+    background: #3d2022 !important;
+    color: #e3dccb !important;
+    border: 1px solid rgba(140, 59, 59, 0.3);
+    border-left: 3px solid #c45c5c !important;
+    box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
+}
+[data-theme="roots"] .cell {
+    background: linear-gradient(145deg, #3d2022, #2a1215) !important;
+    border: 1px solid rgba(140, 59, 59, 0.3) !important;
+    font-family: 'Noto Serif SC', serif !important;
+    color: #e3dccb !important;
+}
+[data-theme="roots"] .cell.completed {
+    background: linear-gradient(145deg, #5c6b50, #4a5740) !important;
+    color: #e3dccb !important;
+    border-color: #8c3b3b !important;
+}
+[data-theme="roots"] .gacha-banner {
+    background: linear-gradient(135deg, #4a1e1e, #1a0a0a) !important;
+}
+[data-theme="roots"] .vesper-comment {
+    background: #1a0a0a;
+    color: #e3dccb;
+    border-left-color: #c45c5c;
+}
+[data-theme="roots"] body {
+    background-image: none !important;
+    background-color: #2a1215;
+}
+
+/* =========================================
+   VESPER BINGO CELEBRATION FX
+   "When you win, the world reacts."
+   ========================================= */
+
+/* Neon Flash / Pulse animation for bingo grid */
+@keyframes neon-flash {
+    0% {
+        box-shadow: 0 0 5px rgba(var(--accent-rgb), 0.3);
+        filter: brightness(1);
+    }
+    25% {
+        box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.6),
+                    0 0 40px rgba(var(--accent-rgb), 0.3),
+                    inset 0 0 15px rgba(var(--accent-rgb), 0.1);
+        filter: brightness(1.15);
+    }
+    50% {
+        box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.8),
+                    0 0 60px rgba(var(--accent-rgb), 0.4),
+                    inset 0 0 20px rgba(var(--accent-rgb), 0.15);
+        filter: brightness(1.25);
+    }
+    75% {
+        box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.6),
+                    0 0 40px rgba(var(--accent-rgb), 0.3),
+                    inset 0 0 15px rgba(var(--accent-rgb), 0.1);
+        filter: brightness(1.15);
+    }
+    100% {
+        box-shadow: 0 0 5px rgba(var(--accent-rgb), 0.3);
+        filter: brightness(1);
+    }
+}
+
+/* Board clear: more intense, highlight-colored flash */
+@keyframes neon-flash-intense {
+    0% {
+        box-shadow: 0 0 5px var(--highlight);
+        filter: brightness(1) saturate(1);
+    }
+    20% {
+        box-shadow: 0 0 30px var(--highlight),
+                    0 0 60px rgba(var(--accent-rgb), 0.5);
+        filter: brightness(1.2) saturate(1.3);
+    }
+    50% {
+        box-shadow: 0 0 50px var(--highlight),
+                    0 0 100px rgba(var(--accent-rgb), 0.6),
+                    inset 0 0 30px rgba(var(--accent-rgb), 0.2);
+        filter: brightness(1.4) saturate(1.5);
+    }
+    80% {
+        box-shadow: 0 0 30px var(--highlight),
+                    0 0 60px rgba(var(--accent-rgb), 0.5);
+        filter: brightness(1.2) saturate(1.3);
+    }
+    100% {
+        box-shadow: 0 0 5px var(--highlight);
+        filter: brightness(1) saturate(1);
+    }
+}
+
+/* Screen shake animation */
+@keyframes screen-shake {
+    0%, 100% { transform: translate(0, 0); }
+    10% { transform: translate(-3px, -2px); }
+    20% { transform: translate(4px, 1px); }
+    30% { transform: translate(-2px, 3px); }
+    40% { transform: translate(3px, -1px); }
+    50% { transform: translate(-4px, 2px); }
+    60% { transform: translate(2px, -3px); }
+    70% { transform: translate(-3px, 1px); }
+    80% { transform: translate(4px, -2px); }
+    90% { transform: translate(-2px, 3px); }
+}
+
+/* Celebration classes applied via JS */
+.bingo-grid.neon-flash-active {
+    animation: neon-flash 0.6s ease-in-out;
+    border-radius: 12px;
+}
+
+.bingo-grid.neon-flash-intense-active {
+    animation: neon-flash-intense 0.8s ease-in-out;
+    border-radius: 12px;
+}
+
+body.screen-shake-active {
+    animation: screen-shake 0.4s ease-in-out;
+}
+
+/* Celebration ripple on individual cells */
+@keyframes cell-ripple {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+    100% { transform: scale(1); }
+}
+
+.cell.bingo-cell-celebrate {
+    animation: cell-ripple 0.3s ease-in-out;
 }

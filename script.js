@@ -5886,11 +5886,111 @@ ${bingoContext}
                     const btn = document.querySelector('#modal-points .btn');
                     if(btn) btn.setAttribute('onclick', 'collectPoints()');
 
-                    if(typeof showToast === 'function') showToast(`系统奖励: +${earnedPoints} 🪙`);
+                    if(typeof showToast === 'function') showToast(`ϵͳ����: +${earnedPoints} ??`);
+
+                    // === VESPER CELEBRATION FX ===
+                    triggerBingoCelebration(isBoardClear);
                 }
             } catch(e) {
                 console.error("Bingo Error", e);
                 alert("Bingo Error: " + e.message);
+            }
+        }
+
+        // --- Bingo Celebration Effects ---
+        function triggerBingoCelebration(isBoardClear) {
+            try {
+                const board = document.getElementById('bingo-board');
+                const theme = document.documentElement.getAttribute('data-theme') || 'default';
+
+                // 1. Screen Shake (via CSS animation + navigator.vibrate)
+                document.body.classList.add('screen-shake-active');
+                setTimeout(() => document.body.classList.remove('screen-shake-active'), 450);
+
+                // Haptic vibration (mobile)
+                if (navigator.vibrate) {
+                    navigator.vibrate(isBoardClear ? [100, 50, 100, 50, 200] : [80, 40, 80]);
+                }
+
+                // 2. Neon Pulse on Bingo Grid
+                if (board) {
+                    const flashClass = isBoardClear ? 'neon-flash-intense-active' : 'neon-flash-active';
+                    board.classList.add(flashClass);
+                    setTimeout(() => board.classList.remove(flashClass), isBoardClear ? 900 : 700);
+                }
+
+                // 3. Confetti Particle Burst (using canvas-confetti)
+                if (typeof confetti === 'function') {
+                    // Determine theme colors for particles
+                    const style = getComputedStyle(document.documentElement);
+                    const accentColor = style.getPropertyValue('--accent').trim() || '#8B5A2B';
+                    const highlightColor = style.getPropertyValue('--highlight').trim() || '#CD853F';
+                    const completedColor = style.getPropertyValue('--completed').trim() || '#6B8E23';
+                    const bgColor = style.getPropertyValue('--bg').trim() || '#F0EAD6';
+
+                    const colors = [accentColor, highlightColor, completedColor];
+
+                    if (isBoardClear) {
+                        // PERFECT CLEAR: Epic multi-burst confetti
+                        const duration = 2000;
+                        const end = Date.now() + duration;
+                        const frame = () => {
+                            confetti({
+                                particleCount: 3,
+                                angle: 60,
+                                spread: 55,
+                                origin: { x: 0, y: 0.7 },
+                                colors: colors
+                            });
+                            confetti({
+                                particleCount: 3,
+                                angle: 120,
+                                spread: 55,
+                                origin: { x: 1, y: 0.7 },
+                                colors: colors
+                            });
+                            if (Date.now() < end) requestAnimationFrame(frame);
+                        };
+                        frame();
+
+                        // Center burst after a beat
+                        setTimeout(() => {
+                            confetti({
+                                particleCount: 120,
+                                spread: 100,
+                                origin: { y: 0.5 },
+                                colors: colors,
+                                startVelocity: 35,
+                                gravity: 0.8,
+                                scalar: 1.2
+                            });
+                        }, 300);
+                    } else {
+                        // Normal BINGO: Single themed burst
+                        confetti({
+                            particleCount: 60,
+                            spread: 70,
+                            origin: { y: 0.6 },
+                            colors: colors,
+                            startVelocity: 25,
+                            gravity: 1,
+                            scalar: 1
+                        });
+                    }
+                }
+
+                // 4. Cell ripple effect on completed cells
+                if (board) {
+                    const cells = board.querySelectorAll('.cell.completed');
+                    cells.forEach((cell, i) => {
+                        setTimeout(() => {
+                            cell.classList.add('bingo-cell-celebrate');
+                            setTimeout(() => cell.classList.remove('bingo-cell-celebrate'), 400);
+                        }, i * 30);
+                    });
+                }
+            } catch(e) {
+                console.error('Celebration FX Error:', e);
             }
         }
         
