@@ -121,6 +121,137 @@
             font-family: 'JetBrains Mono', 'Noto Serif SC', serif !important;
         }
 
+        /* 7. 核磁共振 (MRI) - 克莱因蓝的理智监狱 × 赛博朋克拼贴 */
+        [data-theme="mri"] {
+            --bg: #002FA7;
+            --bg-rgb: 0, 47, 167;
+            --card-bg: #001A5E;
+            --text: #FFFFFF;
+            --accent: #00FFFF;
+            --accent-rgb: 0, 255, 255;
+            --highlight: #FF00FF;
+            --completed: #00FFFF;
+            --daily: #FF00FF;
+            --deadline: #FF003C;
+            --gold: #CCFF00;
+            --shadow: 5px 5px 0px #00FFFF, -5px -5px 0px #FF00FF;
+            --mystery-1: #001247;
+            --mystery-2: #000D33;
+            /* MRI 专属变量 */
+            --mri-alert-red: #FF003C;
+            --mri-glitch-cyan: #00FFFF;
+            --mri-punk-pink: #FF00FF;
+            --mri-acid-green: #CCFF00;
+            --mri-chrome: #C0C0C0;
+        }
+
+        /* MRI 主题：强制无圆角 */
+        [data-theme="mri"] .mini-card,
+        [data-theme="mri"] .sheet,
+        [data-theme="mri"] .cell,
+        [data-theme="mri"] input,
+        [data-theme="mri"] select,
+        [data-theme="mri"] textarea,
+        [data-theme="mri"] .btn,
+        [data-theme="mri"] [style*="border-radius"] {
+            border-radius: 0px !important;
+        }
+
+        /* MRI 主题：按钮 hover 酸性反转 */
+        [data-theme="mri"] .btn:hover,
+        [data-theme="mri"] button:hover {
+            background-color: #CCFF00 !important;
+            color: #000000 !important;
+            transform: skewX(-5deg);
+            transition: all 0.15s ease;
+        }
+
+        /* MRI 主题：色散阴影卡片 */
+        [data-theme="mri"] .mini-card {
+            box-shadow: 4px 4px 0px #00FFFF, -4px -4px 0px #FF00FF;
+            transition: all 0.2s ease;
+        }
+        [data-theme="mri"] .mini-card:hover {
+            box-shadow: 6px 6px 0px #00FFFF, -6px -6px 0px #FF00FF;
+            transform: translate(-2px, -2px);
+        }
+
+        /* MRI 主题：去掉全局网格点 + 不规则光晕纹理 */
+        [data-theme="mri"] body {
+            background-image: none !important;
+            background-size: unset !important;
+        }
+        [data-theme="mri"] body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background:
+                radial-gradient(ellipse 600px 400px at 15% 20%, rgba(0, 255, 255, 0.04) 0%, transparent 70%),
+                radial-gradient(ellipse 500px 600px at 85% 75%, rgba(255, 0, 255, 0.03) 0%, transparent 70%),
+                radial-gradient(ellipse 400px 300px at 50% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 60%),
+                radial-gradient(ellipse 300px 500px at 30% 80%, rgba(0, 255, 255, 0.025) 0%, transparent 65%),
+                radial-gradient(ellipse 350px 250px at 70% 15%, rgba(255, 0, 255, 0.02) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* MRI 主题：状态栏 & 导航栏强化 */
+        [data-theme="mri"] .status-bar {
+            background: #000000 !important;
+            border-bottom: 2px solid #00FFFF !important;
+        }
+        [data-theme="mri"] .nav-bar {
+            background: #000000 !important;
+            border-top: 2px solid #FF00FF !important;
+        }
+        [data-theme="mri"] .nav-item.active {
+            color: #CCFF00 !important;
+        }
+
+        /* MRI 主题：文字强调用朋克粉 */
+        [data-theme="mri"] strong,
+        [data-theme="mri"] b {
+            color: #FF00FF;
+        }
+        [data-theme="mri"] em,
+        [data-theme="mri"] i:not(.nav-item i) {
+            color: #00FFFF;
+            font-style: normal;
+        }
+
+        /* MRI 主题：输入框聚焦发光 */
+        [data-theme="mri"] input:focus,
+        [data-theme="mri"] textarea:focus,
+        [data-theme="mri"] select:focus {
+            box-shadow: 0 0 10px #00FFFF, 0 0 20px rgba(0, 255, 255, 0.3) !important;
+            border-color: #00FFFF !important;
+        }
+
+        /* MRI 主题：滚动条 */
+        [data-theme="mri"] ::-webkit-scrollbar {
+            width: 6px;
+        }
+        [data-theme="mri"] ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        [data-theme="mri"] ::-webkit-scrollbar-thumb {
+            background: #00FFFF;
+            border-radius: 0;
+        }
+
+        /* SVG 图标统一样式 */
+        .ico {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.125em;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
         /* 全局平滑过渡 */
         body, .view, .mini-card, .btn, .status-bar, .nav-bar, .cell, input, select, textarea {
             transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease;
@@ -2309,6 +2440,101 @@ input[type="checkbox"]:checked::after {
 }
 [data-theme="silent"] .excerpt-block-content {
     color: var(--text);
+}
+
+/* =========================================
+   7. MRI (核磁共振): 克莱因蓝的理智监狱
+   "大脑皮层的核磁共振成像。"
+   ========================================= */
+
+/* MRI 主题：聊天气泡 */
+[data-theme="mri"] .chat-message-bubble {
+    border-radius: 0px !important;
+    font-family: 'JetBrains Mono', monospace;
+}
+[data-theme="mri"] .chat-message-bubble[data-msg-role="assistant"] {
+    background: rgba(0, 26, 94, 0.6) !important;
+    color: #E0E0E0 !important;
+    border: 1px solid rgba(255, 0, 255, 0.2) !important;
+    border-left: 3px solid #FF00FF !important;
+}
+
+/* MRI 主题：引用块（助手气泡 / 通用） - 柔和灰蓝 */
+[data-theme="mri"] .quote-block {
+    background: rgba(0, 255, 255, 0.06);
+    border-color: rgba(0, 255, 255, 0.15);
+    border-left-color: #00FFFF;
+}
+[data-theme="mri"] .quote-block-header {
+    color: #8AB4C0;
+}
+[data-theme="mri"] .quote-block-content {
+    color: #A0B0BC;
+}
+[data-theme="mri"] .quote-block:hover {
+    background: rgba(0, 255, 255, 0.1);
+}
+
+/* MRI 主题：用户气泡内的引用块 - 深色调适配青色背景 */
+[data-theme="mri"] .chat-message-bubble[data-msg-role="user"] .quote-block {
+    background: rgba(0, 30, 120, 0.25);
+    border-color: rgba(0, 30, 120, 0.35);
+    border-left-color: rgba(0, 47, 167, 0.7);
+}
+[data-theme="mri"] .chat-message-bubble[data-msg-role="user"] .quote-block-header {
+    color: #1A3A6A;
+}
+[data-theme="mri"] .chat-message-bubble[data-msg-role="user"] .quote-block-content {
+    color: #0D2B5E;
+}
+
+/* MRI 主题：摘录引用块（助手气泡 / 通用） */
+[data-theme="mri"] .excerpt-block {
+    background: rgba(255, 0, 255, 0.06);
+    border-color: rgba(255, 0, 255, 0.15);
+    border-left-color: #FF00FF;
+}
+[data-theme="mri"] .excerpt-block-header {
+    color: #B080B8;
+}
+[data-theme="mri"] .excerpt-block-content {
+    color: #A0B0BC;
+}
+
+/* MRI 主题：用户气泡内的摘录引用 - 深色调适配青色背景 */
+[data-theme="mri"] .chat-message-bubble[data-msg-role="user"] .excerpt-block {
+    background: rgba(80, 0, 80, 0.2);
+    border-color: rgba(80, 0, 80, 0.3);
+    border-left-color: rgba(120, 0, 120, 0.6);
+}
+[data-theme="mri"] .chat-message-bubble[data-msg-role="user"] .excerpt-block-header {
+    color: #3A1A4A;
+}
+[data-theme="mri"] .chat-message-bubble[data-msg-role="user"] .excerpt-block-content {
+    color: #2A1040;
+}
+
+/* MRI 主题：阅读器划线高亮 - 降低亮度，适配深蓝背景 */
+[data-theme="mri"] .reading-highlight[data-color="yellow"],
+[data-theme="mri"] .reading-highlight:not([data-color]) {
+    background: rgba(255, 235, 59, 0.2);
+    border-bottom-color: rgba(255, 193, 7, 0.4);
+}
+[data-theme="mri"] .reading-highlight[data-color="pink"] {
+    background: rgba(255, 0, 255, 0.2);
+    border-bottom-color: rgba(255, 0, 255, 0.4);
+}
+[data-theme="mri"] .reading-highlight[data-color="blue"] {
+    background: rgba(0, 255, 255, 0.2);
+    border-bottom-color: rgba(0, 255, 255, 0.4);
+}
+[data-theme="mri"] .reading-highlight[data-color="green"] {
+    background: rgba(204, 255, 0, 0.2);
+    border-bottom-color: rgba(204, 255, 0, 0.4);
+}
+[data-theme="mri"] .reading-highlight[data-color="purple"] {
+    background: rgba(186, 104, 200, 0.2);
+    border-bottom-color: rgba(156, 39, 176, 0.4);
 }
 
 /* =========================================
