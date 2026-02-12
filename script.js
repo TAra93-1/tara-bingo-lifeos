@@ -159,6 +159,83 @@
             }
         };
 
+        // ==================== 语义嵌入服务 ====================
+
+        const semanticEmbeddingService = {
+            _pipeline: null,
+            _loading: false,
+            _loadPromise: null,
+            _ready: false,
+            _error: null,
+            MODEL_NAME: 'Xenova/bge-small-zh-v1.5',
+
+            async init() {
+                if (this._ready) return true;
+                if (this._loading) return this._loadPromise;
+
+                this._loading = true;
+                this._loadPromise = (async () => {
+                    try {
+                        showToast('正在加载语义模型 (~24MB)，首次需下载...');
+                        console.log('[语义服务] 开始加载 Transformers.js...');
+
+                        const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1');
+                        env.allowLocalModels = false;
+
+                        console.log('[语义服务] 加载模型:', this.MODEL_NAME);
+                        this._pipeline = await pipeline('feature-extraction', this.MODEL_NAME, {
+                            quantized: true
+                        });
+
+                        this._ready = true;
+                        this._loading = false;
+                        console.log('[语义服务] 模型加载完成');
+                        showToast('语义模型已就绪');
+                        return true;
+                    } catch (e) {
+                        this._loading = false;
+                        this._error = e.message;
+                        console.error('[语义服务] 模型加载失败:', e);
+                        showToast('语义模型加载失败，语义触发暂不可用');
+                        return false;
+                    }
+                })();
+
+                return this._loadPromise;
+            },
+
+            async embed(text) {
+                if (!this._ready) {
+                    const ok = await this.init();
+                    if (!ok) throw new Error('语义模型未就绪');
+                }
+
+                const output = await this._pipeline(text, { pooling: 'mean', normalize: true });
+                return Array.from(output.data);
+            },
+
+            cosineSimilarity(a, b) {
+                let dot = 0;
+                for (let i = 0; i < a.length; i++) {
+                    dot += a[i] * b[i];
+                }
+                return dot;
+            },
+
+            isReady() {
+                return this._ready;
+            }
+        };
+
+        function simpleHash(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash |= 0;
+            }
+            return hash.toString(36);
+        }
+
         // ==================== 离线模式管理 ====================
 
         // 网络状态管理
@@ -1336,6 +1413,9 @@ ${gridText}`;
             document.getElementById('character-detail-bg-cooldown').value = cooldown < 60 ? cooldown * 60 : cooldown;
             document.getElementById('character-max-memory').value = character.settings.maxMemory || 20;
             document.getElementById('character-worldbook-scan-depth').value = character.settings.worldBookScanDepth || 10;
+            const semThreshold = character.settings.semanticThreshold || 0.55;
+            document.getElementById('character-semantic-threshold').value = semThreshold;
+            document.getElementById('semantic-threshold-value').textContent = semThreshold;
             document.getElementById('character-detail-pinned-memory').value = character.settings.pinnedMemory || 0;
             document.getElementById('character-detail-auto-summary').checked = character.settings.autoSummary || false;
             document.getElementById('character-detail-summary-interval').value = character.settings.summaryInterval || 10;
@@ -1457,20 +1537,18 @@ ${gridText}`;
                 return;
             }
 
-            listDiv.innerHTML = '';
             const linkedIds = currentEditingCharacter.settings.bingoLinkIds || [];
-            activeProjects.forEach(p => {
+            const html = activeProjects.map(p => {
                 const isLinked = linkedIds.includes(p.id);
-                listDiv.innerHTML += `
-                    <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;">
+                return `<div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;">
                         <input type="checkbox" id="bingo-check-${p.id}" data-pid="${p.id}" ${isLinked ? 'checked' : ''} style="width:auto;">
                         <label for="bingo-check-${p.id}" style="flex:1; cursor:pointer;">
                             <div style="font-weight:bold;">${p.theme}</div>
                             <div style="font-size:0.7rem; opacity:0.6;">${p.tag} - ${p.tasks.length}个任务</div>
                         </label>
-                    </div>
-                `;
-            });
+                    </div>`;
+            }).join('');
+            listDiv.innerHTML = html;
 
             document.getElementById('modal-select-bingo').classList.add('active');
         }
@@ -1501,19 +1579,16 @@ ${gridText}`;
                 return;
             }
 
-            listDiv.innerHTML = '';
-            worldBooks.forEach(wb => {
+            listDiv.innerHTML = worldBooks.map(wb => {
                 const isLinked = currentEditingCharacter.settings.linkedWorldBookIds.includes(wb.id);
-                listDiv.innerHTML += `
-                    <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;">
+                return `<div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;">
                         <input type="checkbox" id="wb-check-${wb.id}" ${isLinked ? 'checked' : ''} style="width:auto;">
                         <label for="wb-check-${wb.id}" style="flex:1; cursor:pointer;">
                             <div style="font-weight:bold;">${wb.name}</div>
                             <div style="font-size:0.7rem; opacity:0.6;">${wb.entries ? wb.entries.length : 0} 个条目</div>
                         </label>
-                    </div>
-                `;
-            });
+                    </div>`;
+            }).join('');
 
             document.getElementById('modal-select-worldbooks').classList.add('active');
         }
@@ -1559,6 +1634,7 @@ ${gridText}`;
             currentEditingCharacter.settings.bgCooldown = parseInt(document.getElementById('character-detail-bg-cooldown').value) || 120;
             currentEditingCharacter.settings.maxMemory = parseInt(document.getElementById('character-max-memory').value) || 20;
             currentEditingCharacter.settings.worldBookScanDepth = parseInt(document.getElementById('character-worldbook-scan-depth').value) || 10;
+            currentEditingCharacter.settings.semanticThreshold = parseFloat(document.getElementById('character-semantic-threshold').value) || 0.55;
             currentEditingCharacter.settings.pinnedMemory = parseInt(document.getElementById('character-detail-pinned-memory').value) || 0;
             currentEditingCharacter.settings.autoSummary = document.getElementById('character-detail-auto-summary').checked;
             currentEditingCharacter.settings.summaryInterval = parseInt(document.getElementById('character-detail-summary-interval').value) || 10;
@@ -2885,15 +2961,38 @@ ${gridText}`;
             if(currentChatCharacter.scenario) prompt += `## 当前场景\n${currentChatCharacter.scenario}\n\n`;
             if(currentChatCharacter.mes_example) prompt += `## 对话示例\n${currentChatCharacter.mes_example}\n\n`;
 
-            // 2. 世界书内容注入（支持蓝灯常驻/绿灯关键词触发）
+            // 2. 世界书内容注入（支持蓝灯常驻/绿灯关键词/紫灯语义触发）
             if(currentChatCharacter.settings.linkedWorldBookIds && currentChatCharacter.settings.linkedWorldBookIds.length > 0) {
-                // 获取最近对话作为关键词扫描上下文
-                const scanDepth = currentChatCharacter.settings.worldBookScanDepth || 10; // 默认扫描最近10条消息
+                // 获取最近对话作为扫描上下文
+                const scanDepth = currentChatCharacter.settings.worldBookScanDepth || 10;
                 const recentMessages = currentChatCharacter.chatHistory.slice(-scanDepth);
-                const contextText = recentMessages.map(m => m.content).join(' ').toLowerCase();
+                const contextTextRaw = recentMessages.map(m => m.content).join(' ');
+                const contextText = contextTextRaw.toLowerCase(); // 用于关键词匹配
 
                 let worldBookContent = '';
                 let activatedCount = 0;
+
+                // 预扫描：是否有需要语义匹配的条目
+                let hasSemanticEntries = false;
+                for (const wbId of currentChatCharacter.settings.linkedWorldBookIds) {
+                    const wb = await db.worldBooks.get(wbId);
+                    if (wb && wb.entries && wb.entries.some(e => e.enabled && e.triggerMode === 'semantic' && e.embedding)) {
+                        hasSemanticEntries = true;
+                        break;
+                    }
+                }
+
+                // 如有语义条目，计算一次上下文向量
+                let contextEmbedding = null;
+                if (hasSemanticEntries) {
+                    try {
+                        contextEmbedding = await semanticEmbeddingService.embed(contextTextRaw);
+                    } catch (e) {
+                        console.warn('[世界书] 语义模型加载失败，跳过语义触发条目:', e.message);
+                    }
+                }
+
+                const semanticThreshold = currentChatCharacter.settings.semanticThreshold || 0.55;
 
                 for(const wbId of currentChatCharacter.settings.linkedWorldBookIds) {
                     const wb = await db.worldBooks.get(wbId);
@@ -2907,6 +3006,15 @@ ${gridText}`;
                             if (triggerMode === 'always') {
                                 // 蓝灯常驻：始终激活
                                 shouldActivate = true;
+                            } else if (triggerMode === 'semantic') {
+                                // 紫灯语义：余弦相似度匹配
+                                if (contextEmbedding && entry.embedding) {
+                                    const similarity = semanticEmbeddingService.cosineSimilarity(contextEmbedding, entry.embedding);
+                                    shouldActivate = similarity >= semanticThreshold;
+                                    if (shouldActivate) {
+                                        console.log(`[世界书] 语义匹配: "${entry.name}" (相似度: ${similarity.toFixed(3)})`);
+                                    }
+                                }
                             } else {
                                 // 绿灯关键词触发：检查关键词是否出现在上下文中
                                 if (entry.keys && entry.keys.length > 0) {
@@ -3089,6 +3197,10 @@ ${gridText}`;
                     // 离线模式初始化失败不应阻止页面正常运行
                 }
 
+                // 启动自动备份
+                console.log('[初始化] 启动自动备份...');
+                startAutoBackup();
+
                 console.log('[初始化] ✓ 系统初始化完成');
 
             } catch (error) {
@@ -3150,8 +3262,14 @@ ${gridText}`;
                             console.error('[数据恢复] 备份失败:', backupError);
                         }
 
-                        // 继续使用默认数据
-                        console.log('[数据加载] 使用默认数据');
+                        // 尝试从自动备份恢复
+                        const restored = tryRestoreFromAutoBackup();
+                        if (restored) {
+                            store = { ...store, ...restored };
+                            console.log('[数据恢复] 已从自动备份恢复');
+                        } else {
+                            console.log('[数据加载] 使用默认数据');
+                        }
                     }
                 }
 
@@ -3224,7 +3342,92 @@ ${gridText}`;
                 console.warn('[备份清理] 清理失败:', e);
             }
         }
-        
+
+        // ==================== 自动备份机制 ====================
+        let autoBackupTimer = null;
+        const AUTO_BACKUP_INTERVAL = 5 * 60 * 1000; // 5分钟
+        const AUTO_BACKUP_KEY = `${DB_KEY}_auto_backup`;
+        const AUTO_BACKUP_TIME_KEY = `${DB_KEY}_auto_backup_time`;
+
+        function startAutoBackup() {
+            if (autoBackupTimer) clearInterval(autoBackupTimer);
+            autoBackupTimer = setInterval(() => {
+                performAutoBackup();
+            }, AUTO_BACKUP_INTERVAL);
+
+            // 页面关闭/隐藏时也保存一次
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    performAutoBackup();
+                }
+            });
+            window.addEventListener('beforeunload', () => {
+                performAutoBackup();
+            });
+
+            // 检查是否需要提醒用户导出
+            checkExportReminder();
+
+            console.log('[自动备份] 已启动，间隔 5 分钟');
+        }
+
+        function performAutoBackup() {
+            try {
+                const dataString = JSON.stringify(store);
+                const dataSize = new Blob([dataString]).size;
+
+                // 如果数据超过 4MB，跳过自动备份避免撑爆 localStorage
+                if (dataSize > 4 * 1024 * 1024) {
+                    console.warn('[自动备份] 数据量过大，跳过自动快照');
+                    return;
+                }
+
+                localStorage.setItem(AUTO_BACKUP_KEY, dataString);
+                localStorage.setItem(AUTO_BACKUP_TIME_KEY, new Date().toISOString());
+                console.log('[自动备份] 快照已保存 (' + (dataSize / 1024).toFixed(1) + 'KB)');
+            } catch(e) {
+                console.warn('[自动备份] 快照保存失败:', e);
+            }
+        }
+
+        // 从自动备份恢复（在 loadData 检测到主数据损坏时调用）
+        function tryRestoreFromAutoBackup() {
+            try {
+                const backupData = localStorage.getItem(AUTO_BACKUP_KEY);
+                const backupTime = localStorage.getItem(AUTO_BACKUP_TIME_KEY);
+                if (backupData) {
+                    const parsed = JSON.parse(backupData);
+                    const timeStr = backupTime ? new Date(backupTime).toLocaleString('zh-CN') : '未知时间';
+                    if (confirm(`检测到数据异常！发现自动备份（${timeStr}），是否恢复？`)) {
+                        return parsed;
+                    }
+                }
+            } catch(e) {
+                console.error('[自动备份] 恢复失败:', e);
+            }
+            return null;
+        }
+
+        // 定期提醒用户手动导出
+        function checkExportReminder() {
+            const lastExportKey = `${DB_KEY}_last_export`;
+            const lastExport = localStorage.getItem(lastExportKey);
+            const now = Date.now();
+            const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+
+            if (!lastExport || (now - parseInt(lastExport)) > SEVEN_DAYS) {
+                // 延迟提醒，不打断初始化
+                setTimeout(() => {
+                    showToast('已超过7天未手动导出备份，建议前往「数据归档」导出');
+                }, 10000);
+            }
+        }
+
+        // 标记导出时间（在 exportData 中调用）
+        function markExportTime() {
+            localStorage.setItem(`${DB_KEY}_last_export`, Date.now().toString());
+        }
+
         function updateAiChatStatus(text, type = 'info', duration = 2000) {
             const statusEl = document.getElementById('ai-chat-status');
             if (!statusEl) return;
@@ -4629,11 +4832,10 @@ ${gridText}`;
                 alert('暂无进行中的Bingo卡');
                 return;
             }
-            listDiv.innerHTML = '';
             const linkedIds = store.aiLinkedBingoIds || [];
-            activeProjects.forEach(p => {
+            listDiv.innerHTML = activeProjects.map(p => {
                 const isLinked = linkedIds.includes(p.id);
-                listDiv.innerHTML += `
+                return `
                     <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;">
                         <input type="checkbox" id="bingo-check-ai-${p.id}" data-pid="${p.id}" ${isLinked ? 'checked' : ''} style="width:auto;">
                         <label for="bingo-check-ai-${p.id}" style="flex:1; cursor:pointer;">
@@ -4642,7 +4844,7 @@ ${gridText}`;
                         </label>
                     </div>
                 `;
-            });
+            }).join('');
             // 重新绑定确认按钮的onclick事件
             document.querySelector('#modal-select-bingo .btn').setAttribute('onclick', 'confirmBingoCardSelectionForAI()');
             document.getElementById('modal-select-bingo').classList.add('active');
@@ -4698,12 +4900,11 @@ ${gridText}`;
                     return;
                 }
 
-                listDiv.innerHTML = '';
-                worldBooks.forEach(wb => {
+                listDiv.innerHTML = worldBooks.map(wb => {
                     const entryCount = wb.entries ? wb.entries.length : 0;
                     const enabledCount = wb.entries ? wb.entries.filter(e => e.enabled).length : 0;
 
-                    listDiv.innerHTML += `
+                    return `
                         <div class="mini-card" onclick="openWorldBookDetail('${wb.id}')" style="cursor:pointer;">
                             <div style="flex:1;">
                                 <div style="font-weight:bold; margin-bottom:5px;">${wb.name}</div>
@@ -4715,7 +4916,7 @@ ${gridText}`;
                             <div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg></div>
                         </div>
                     `;
-                });
+                }).join('');
             } catch(error) {
                 console.error('渲染世界书列表失败:', error);
                 listDiv.innerHTML = '<div style="text-align:center; opacity:0.5; margin-top:50px; color:red;">加载失败</div>';
@@ -4839,17 +5040,16 @@ ${gridText}`;
                 return;
             }
 
-            listDiv.innerHTML = '';
-            currentEditingWorldBook.entries.forEach((entry, index) => {
+            listDiv.innerHTML = currentEditingWorldBook.entries.map((entry, index) => {
                 const statusColor = entry.enabled ? 'var(--completed)' : '#999';
                 const statusText = entry.enabled ? '已启用' : '已禁用';
 
                 // 触发模式指示灯
                 const triggerMode = entry.triggerMode || 'keyword';
-                const lightColor = triggerMode === 'always' ? '#2196F3' : '#4CAF50'; // 蓝色常驻 / 绿色关键词
-                const lightTitle = triggerMode === 'always' ? '常驻触发' : '关键词触发';
+                const lightColor = triggerMode === 'always' ? '#2196F3' : triggerMode === 'semantic' ? '#9C27B0' : '#4CAF50';
+                const lightTitle = triggerMode === 'always' ? '常驻触发' : triggerMode === 'semantic' ? '语义触发' : '关键词触发';
 
-                listDiv.innerHTML += `
+                return `
                     <div class="mini-card" onclick="editWorldBookEntry(${index})" style="cursor:pointer; opacity:${entry.enabled ? '1' : '0.6'};">
                         <div style="flex:1;">
                             <div style="display:flex; align-items:center; gap:6px; margin-bottom:3px;">
@@ -4857,7 +5057,7 @@ ${gridText}`;
                                 <span style="font-weight:bold;">${entry.name}</span>
                             </div>
                             <div style="font-size:0.7rem; opacity:0.7;">
-                                ${triggerMode === 'always' ? '常驻' : '关键词: ' + (entry.keys.join(', ') || '无')}
+                                ${triggerMode === 'always' ? '常驻' : triggerMode === 'semantic' ? '语义匹配' + (entry.embedding ? ' ✓' : ' (未生成向量)') : '关键词: ' + (entry.keys.join(', ') || '无')}
                             </div>
                             <div style="font-size:0.65rem; color:${statusColor}; margin-top:3px;">
                                 ${statusText}
@@ -4873,7 +5073,7 @@ ${gridText}`;
                         </div>
                     </div>
                 `;
-            });
+            }).join('');
         }
 
         // 创建新条目
@@ -4915,16 +5115,23 @@ ${gridText}`;
         function updateTriggerModeUI(mode) {
             const alwaysBtn = document.getElementById('trigger-always-btn');
             const keywordBtn = document.getElementById('trigger-keyword-btn');
+            const semanticBtn = document.getElementById('trigger-semantic-btn');
             const keysInput = document.getElementById('entry-keys');
             const keysHint = document.getElementById('entry-keys-hint');
 
+            alwaysBtn.classList.remove('active');
+            keywordBtn.classList.remove('active');
+            if (semanticBtn) semanticBtn.classList.remove('active');
+
             if (mode === 'always') {
                 alwaysBtn.classList.add('active');
-                keywordBtn.classList.remove('active');
                 keysInput.placeholder = '可选，仅用于显示';
                 keysHint.textContent = '蓝灯常驻模式：条目将始终发送给AI';
+            } else if (mode === 'semantic') {
+                if (semanticBtn) semanticBtn.classList.add('active');
+                keysInput.placeholder = '可选，仅用于显示';
+                keysHint.textContent = '紫灯语义模式：AI通过语义相似度自动匹配相关条目（首次使用需下载~24MB模型）';
             } else {
-                alwaysBtn.classList.remove('active');
                 keywordBtn.classList.add('active');
                 keysInput.placeholder = '例如：王国,艾尔登,首都';
                 keysHint.textContent = '绿灯关键词模式：当对话中出现这些关键词时，该条目才会被激活';
@@ -4970,8 +5177,34 @@ ${gridText}`;
                 keys: keys,
                 content: content,
                 enabled: enabled,
-                triggerMode: triggerMode // 'always' = 蓝灯常驻, 'keyword' = 绿灯关键词触发
+                triggerMode: triggerMode // 'always' = 蓝灯常驻, 'keyword' = 绿灯关键词触发, 'semantic' = 紫灯语义
             };
+
+            // 语义模式：生成向量嵌入
+            if (triggerMode === 'semantic') {
+                const embeddingText = name + '。' + content;
+                const contentHash = simpleHash(embeddingText);
+
+                // 如果内容没变且已有向量，跳过重新生成
+                const existingEntry = currentEditingEntry ? currentEditingEntry.data : null;
+                if (existingEntry && existingEntry.embedding && existingEntry.embeddingHash === contentHash) {
+                    entryData.embedding = existingEntry.embedding;
+                    entryData.embeddingHash = existingEntry.embeddingHash;
+                    console.log('[语义服务] 内容未变，复用已有向量');
+                } else {
+                    try {
+                        showToast('正在生成语义向量...');
+                        entryData.embedding = await semanticEmbeddingService.embed(embeddingText);
+                        entryData.embeddingHash = contentHash;
+                        console.log('[语义服务] 向量生成成功，维度:', entryData.embedding.length);
+                    } catch (embErr) {
+                        console.warn('[语义服务] 向量生成失败:', embErr);
+                        showToast('语义模型加载失败，条目已保存但语义触发暂不可用');
+                        entryData.embedding = null;
+                        entryData.embeddingHash = null;
+                    }
+                }
+            }
 
             try {
                 if(currentEditingEntry !== null) {
@@ -5222,9 +5455,8 @@ ${gridText}`;
                 return;
             }
 
-            listDiv.innerHTML = '';
-            categories.forEach(cat => {
-                listDiv.innerHTML += `
+            listDiv.innerHTML = categories.map(cat => {
+                return `
                     <div class="mini-card" style="padding:10px 15px;">
                         <div style="flex:1; font-weight:bold;">${cat.name}</div>
                         <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.7rem; color:#c62828;" onclick="deleteCategory(${cat.id})">
@@ -5232,7 +5464,7 @@ ${gridText}`;
                         </button>
                     </div>
                 `;
-            });
+            }).join('');
         }
 
         // 创建分类
@@ -5668,14 +5900,13 @@ ${bingoContext}
         // --- Shop & History & Gacha ---
         function renderShop() {
             const grid = document.getElementById('shop-list');
-            grid.innerHTML = '';
-            store.shopItems.forEach(item => {
+            grid.innerHTML = store.shopItems.map(item => {
                 const isCooldown = item.type==='cooldown' && isSameDay(item.lastBuy);
                 const canAfford = store.balance >= item.cost;
                 const btnState = (canAfford && !isCooldown) ? '' : 'disabled';
                 const btnText = isCooldown ? '今日已兑' : '兑换';
-                
-                grid.innerHTML += `
+
+                return `
                     <div class="shop-item ${isCooldown?'cooldown':''}">
                         <div style="position:absolute;top:5px;right:5px;font-size:1.2rem;line-height:1;opacity:0.5;cursor:pointer;" onclick="deleteShopItem(${item.id})">×</div>
                         <div class="shop-icon">${item.icon}</div>
@@ -5684,7 +5915,7 @@ ${bingoContext}
                         <button class="btn" style="margin-top:8px; padding:6px; font-size:0.8rem;" ${btnState} onclick="buyItem(${item.id})">${btnText}</button>
                     </div>
                 `;
-            });
+            }).join('');
         }
         function isSameDay(ts) {
             if(!ts) return false;
@@ -5705,17 +5936,17 @@ ${bingoContext}
         }
         function openHistory() {
             const list = document.getElementById('history-list');
-            list.innerHTML = '';
+            let html = '';
 
             // 显示周账单
             if(store.weeklyBills && store.weeklyBills.length > 0) {
-                list.innerHTML += '<h4 style="margin:15px 0 10px; color:var(--accent); font-size:0.9rem;">📊 周账单存档</h4>';
+                html += '<h4 style="margin:15px 0 10px; color:var(--accent); font-size:0.9rem;">📊 周账单存档</h4>';
                 store.weeklyBills.forEach(bill => {
                     let itemsDetail = '';
                     for(let item in bill.purchases) {
                         itemsDetail += `<div style="font-size:0.75rem; opacity:0.7; margin-top:2px;">· ${item} × ${bill.purchases[item]}</div>`;
                     }
-                    list.innerHTML += `
+                    html += `
                         <div style="background:rgba(0,0,0,0.02); padding:10px; border-radius:8px; margin-bottom:10px; border-left:3px solid var(--accent);">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <div style="font-weight:bold; font-size:0.85rem;">周期: ${bill.weekStart} ~ ${bill.weekEnd}</div>
@@ -5725,15 +5956,15 @@ ${bingoContext}
                         </div>
                     `;
                 });
-                list.innerHTML += '<h4 style="margin:20px 0 10px; color:var(--text); opacity:0.7; font-size:0.9rem;">📜 本周消费流水</h4>';
+                html += '<h4 style="margin:20px 0 10px; color:var(--text); opacity:0.7; font-size:0.9rem;">📜 本周消费流水</h4>';
             }
 
             // 显示本周消费记录
             if(!store.redemptions || store.redemptions.length === 0) {
-                list.innerHTML += '<div style="text-align:center; opacity:0.5; margin-top:20px;">暂无消费记录。</div>';
+                html += '<div style="text-align:center; opacity:0.5; margin-top:20px;">暂无消费记录。</div>';
             } else {
                 store.redemptions.forEach(r => {
-                    list.innerHTML += `
+                    html += `
                         <div class="history-item">
                             <div>
                                 <div>${r.name}</div>
@@ -5744,6 +5975,7 @@ ${bingoContext}
                     `;
                 });
             }
+            list.innerHTML = html;
             document.getElementById('modal-history').classList.add('active');
         }
         
@@ -5787,15 +6019,14 @@ ${bingoContext}
         }
         function renderGachaPoolList() {
             const list = document.getElementById('gacha-pool-list');
-            list.innerHTML = '';
-            store.gachaPool.forEach((item, index) => {
-                list.innerHTML += `
+            list.innerHTML = store.gachaPool.map((item, index) => {
+                return `
                     <div class="pool-list-item">
                         <span>${item}</span>
                         <span style="color:#c62828; font-weight:bold; cursor:pointer;" onclick="removeGachaItem(${index})">×</span>
                     </div>
                 `;
-            });
+            }).join('');
         }
         function addGachaItem() {
             const input = document.getElementById('new-gacha-item');
@@ -6090,17 +6321,18 @@ ${bingoContext}
             document.getElementById('cal-title').innerText = viewDate.toLocaleString('default',{month:'long'});
             document.getElementById('cal-year').innerText = y;
             const grid = document.getElementById('calendar-body');
-            grid.innerHTML = ['S','M','T','W','T','F','S'].map(k=>`<div class="weekday">${k}</div>`).join('');
+            let calHtml = ['S','M','T','W','T','F','S'].map(k=>`<div class="weekday">${k}</div>`).join('');
             const fd = new Date(y,m,1).getDay(), dim = new Date(y,m+1,0).getDate(), today = getLocalToday();
             // 添加空白格对齐第一天
             for(let i=0; i<fd; i++) {
-                grid.innerHTML += `<div class="cal-day"></div>`;
+                calHtml += `<div class="cal-day"></div>`;
             }
             for(let d=1;d<=dim;d++) {
                 const k=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
                 const c = store.dailyStats[k]||0;
-                grid.innerHTML += `<div class="cal-day ${k===today?'today':''} ${c>0?'has-data':''}" onclick="openDayDetail('${k}')">${d}</div>`;
+                calHtml += `<div class="cal-day ${k===today?'today':''} ${c>0?'has-data':''}" onclick="openDayDetail('${k}')">${d}</div>`;
             }
+            grid.innerHTML = calHtml;
         }
         function renderActiveList() {
             const div = document.getElementById('active-list');
@@ -6113,6 +6345,7 @@ ${bingoContext}
             }
 
             // 混合显示模式:先显示所有父项目,再在其下缩进显示子项目
+            let activeHtml = '';
             activeProjects.forEach(p => {
                 // 跳过有父级的项目,它们会在父级下面显示
                 if(p.parentId) return;
@@ -6134,7 +6367,7 @@ ${bingoContext}
                     deadlineHtml = `<span style="background:${deadlineColor}; color:white; padding:2px 8px; border-radius:4px; font-size:0.65rem; font-weight:bold; margin-left:4px;">⏰ ${p.deadline} (${daysLeft}天)</span>`;
                 }
 
-                div.innerHTML += `
+                activeHtml += `
                     <div class="mini-card" onclick="openProject(${p.id})" style="border-left: 4px solid ${diffColor}; padding: 12px 15px;">
                         <div style="width:100%;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -6174,7 +6407,7 @@ ${bingoContext}
                     if(cp.difficulty === 'hell') { childDiffColor = '#EF5350'; childDiffLabel = 'HELL'; }
                     if(cp.customDifficulty) { childDiffLabel = 'CUSTOM'; childDiffColor = '#FF9800'; }
 
-                    div.innerHTML += `
+                    activeHtml += `
                         <div class="mini-card" onclick="openProject(${cp.id})" style="border-left: 3px solid ${childDiffColor}; padding: 10px 12px; margin-left:20px; margin-bottom:8px; opacity:0.9;">
                             <div style="width:100%;">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
@@ -6199,6 +6432,7 @@ ${bingoContext}
                     `;
                 });
             });
+            div.innerHTML = activeHtml;
         }
         function openProject(pid) {
             currentPid = pid; const p = store.projects.find(x=>x.id===pid); if(!p) return;
@@ -6522,20 +6756,23 @@ ${bingoContext}
             }
         }
         function renderFocus() {
-            const list = document.getElementById('focus-list'); 
+            const list = document.getElementById('focus-list');
             const filterDiv = document.getElementById('focus-filter');
-            list.innerHTML=''; filterDiv.innerHTML='';
             const activeProjects = store.projects.filter(p=>p.status==='active');
-            
-            if(activeProjects.length === 0) { list.innerHTML='<div style="text-align:center;opacity:0.6;margin-top:20px;">无活跃计划</div>'; return; }
 
+            if(activeProjects.length === 0) { list.innerHTML='<div style="text-align:center;opacity:0.6;margin-top:20px;">无活跃计划</div>'; filterDiv.innerHTML=''; return; }
+
+            let filterHtml = '';
+            let listHtml = '';
             activeProjects.forEach(p => {
                 const isSel = selectedFocusPids.has(p.id);
-                filterDiv.innerHTML += `<div class="filter-chip ${isSel?'active':''}" onclick="toggleFocus(${p.id})">${p.theme}</div>`;
+                filterHtml += `<div class="filter-chip ${isSel?'active':''}" onclick="toggleFocus(${p.id})">${p.theme}</div>`;
                 if(selectedFocusPids.size===0 || isSel) {
-                    p.tasks.forEach((t,i)=>{ if(!t.completed) list.innerHTML+=`<div class="mini-card focus-item" data-pid="${p.id}" onclick="tempTask={pid:${p.id},i:${i},tag:'${p.tag}'};document.getElementById('timer-title').innerText='${t.text}';document.getElementById('modal-timer').classList.add('active');"><div><strong>${t.text}</strong><br><small>${p.theme}</small></div></div>`; });
+                    p.tasks.forEach((t,i)=>{ if(!t.completed) listHtml+=`<div class="mini-card focus-item" data-pid="${p.id}" onclick="tempTask={pid:${p.id},i:${i},tag:'${p.tag}'};document.getElementById('timer-title').innerText='${t.text}';document.getElementById('modal-timer').classList.add('active');"><div><strong>${t.text}</strong><br><small>${p.theme}</small></div></div>`; });
                 }
             });
+            filterDiv.innerHTML = filterHtml;
+            list.innerHTML = listHtml;
         }
         function toggleFocus(pid) { selectedFocusPids.has(pid)?selectedFocusPids.delete(pid):selectedFocusPids.add(pid); renderFocus(); }
         function rollDice() { const all=document.querySelectorAll('.focus-item'); if(all.length){all.forEach(e=>e.style.backgroundColor='var(--card-bg)');const t=all[Math.floor(Math.random()*all.length)];t.style.backgroundColor='var(--highlight)';t.scrollIntoView({behavior:'smooth',block:'center'});}}
@@ -6629,21 +6866,33 @@ ${bingoContext}
             let msg = (store.dailyStats[today]||0) > 0 ? "积分正在上涨。" : "你的账户需要流动性。";
             document.getElementById('vesper-report').innerText = `>> VESPER_LOG:\n${msg}`;
             
-            const heatGrid = document.getElementById('heatmap-body'); heatGrid.innerHTML = '';
+            const heatGrid = document.getElementById('heatmap-body');
+            let heatHtml = '';
             for(let i=19; i>=0; i--) {
                 const d = new Date(); d.setDate(d.getDate() - i); const k = d.toISOString().split('T')[0];
-                const c = store.dailyStats[k] || 0; heatGrid.innerHTML += `<div class="heat-cell ${c>0?'heat-l1':''} ${c>2?'heat-l2':''} ${c>5?'heat-l3':''}" title="${k}: ${c}"></div>`;
+                const c = store.dailyStats[k] || 0; heatHtml += `<div class="heat-cell ${c>0?'heat-l1':''} ${c>2?'heat-l2':''} ${c>5?'heat-l3':''}" title="${k}: ${c}"></div>`;
             }
+            heatGrid.innerHTML = heatHtml;
 
             if(document.getElementById('chart-line')) {
                 const labels = [], dataLine = [];
                 for(let i=6; i>=0; i--) { const d = new Date(); d.setDate(d.getDate() - i); labels.push(d.getDate()+'日'); dataLine.push(store.dailyStats[d.toISOString().split('T')[0]]||0); }
-                if(charts.line) charts.line.destroy();
-                charts.line = new Chart(document.getElementById('chart-line').getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: 'Tasks', data: dataLine, borderColor: '#8B5A2B', tension: 0.4 }] }, options: { maintainAspectRatio:false } });
-                
+                if(charts.line) {
+                    charts.line.data.labels = labels;
+                    charts.line.data.datasets[0].data = dataLine;
+                    charts.line.update();
+                } else {
+                    charts.line = new Chart(document.getElementById('chart-line').getContext('2d'), { type: 'line', data: { labels, datasets: [{ label: 'Tasks', data: dataLine, borderColor: '#8B5A2B', tension: 0.4 }] }, options: { maintainAspectRatio:false } });
+                }
+
                 const tags = { '学习':0, '生活':0, '娱乐':0, '创造':0 }; store.logs.forEach(l=>{if(tags[l.tag]!==undefined)tags[l.tag]++});
-                if(charts.pie) charts.pie.destroy();
-                charts.pie = new Chart(document.getElementById('chart-pie').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(tags), datasets: [{ data: Object.values(tags), backgroundColor: ['#7B68EE', '#6B8E23', '#D2691E', '#C71585'] }] }, options: { maintainAspectRatio:false, plugins:{legend:{position:'right'}} } });
+                if(charts.pie) {
+                    charts.pie.data.labels = Object.keys(tags);
+                    charts.pie.data.datasets[0].data = Object.values(tags);
+                    charts.pie.update();
+                } else {
+                    charts.pie = new Chart(document.getElementById('chart-pie').getContext('2d'), { type: 'doughnut', data: { labels: Object.keys(tags), datasets: [{ data: Object.values(tags), backgroundColor: ['#7B68EE', '#6B8E23', '#D2691E', '#C71585'] }] }, options: { maintainAspectRatio:false, plugins:{legend:{position:'right'}} } });
+                }
 
                 updateChartColors(store.theme || 'default');
             }
@@ -6674,6 +6923,7 @@ ${bingoContext}
                 return;
             }
 
+            let archiveHtml = '';
             archivedProjects.forEach(p => {
                 // 跳过有父级的项目,它们会在父级下面显示
                 if(p.parentId) return;
@@ -6687,7 +6937,7 @@ ${bingoContext}
 
                 const archiveDate = p.archivedAt ? new Date(p.archivedAt).toLocaleDateString('zh-CN') : '未知';
 
-                div.innerHTML += `
+                archiveHtml += `
                     <div class="mini-card" onclick="openProject(${p.id})" style="opacity:0.85; border-left:4px solid ${diffColor}; padding:12px 15px;">
                         <div style="width:100%;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -6726,7 +6976,7 @@ ${bingoContext}
 
                     const childArchiveDate = cp.archivedAt ? new Date(cp.archivedAt).toLocaleDateString('zh-CN') : '未知';
 
-                    div.innerHTML += `
+                    archiveHtml += `
                         <div class="mini-card" onclick="openProject(${cp.id})" style="opacity:0.75; border-left:3px solid ${childDiffColor}; padding:10px 12px; margin-left:25px; margin-bottom:8px;">
                             <div style="width:100%;">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
@@ -6749,6 +6999,7 @@ ${bingoContext}
                     `;
                 });
             });
+            div.innerHTML = archiveHtml;
         }
 
         // --- Report Generation Logic ---
@@ -7196,6 +7447,7 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
         }
         
         async function exportData() {
+            showToast('正在准备导出数据...');
             // 导出完整数据：localStorage (store) + IndexedDB (角色、世界书、图书馆)
             const fullBackup = {
                 version: 3,
@@ -7231,13 +7483,54 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
             a.href = s;
             a.download = `lifeos_full_backup_${new Date().toISOString().slice(0,10)}.json`;
             a.click();
+            markExportTime();
         }
         function triggerImport(m) { importMode=m; document.getElementById('file-import').click(); }
         async function handleFile(input) {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
+                    // 文件大小检查（50MB上限）
+                    if (e.target.result.length > 50 * 1024 * 1024) {
+                        alert('导入失败：文件过大（超过50MB），请检查文件');
+                        return;
+                    }
+
                     const d = JSON.parse(e.target.result);
+
+                    // 基本类型验证
+                    if (typeof d !== 'object' || d === null || Array.isArray(d)) {
+                        alert('导入失败：文件格式不正确，需要一个 JSON 对象');
+                        return;
+                    }
+
+                    // 新版格式的 store 字段验证
+                    if (d.version && d.version >= 2) {
+                        if (!d.store || typeof d.store !== 'object') {
+                            alert('导入失败：备份文件缺少 store 数据');
+                            return;
+                        }
+                        if (d.store.projects && !Array.isArray(d.store.projects)) {
+                            alert('导入失败：projects 字段格式不正确');
+                            return;
+                        }
+                    } else {
+                        // 旧版格式至少应该有 projects 或 balance
+                        if (!d.projects && d.balance === undefined && !d.version) {
+                            alert('导入失败：无法识别的备份格式');
+                            return;
+                        }
+                    }
+
+                    // 确认导入
+                    const sizeKB = (e.target.result.length / 1024).toFixed(1);
+                    if (!confirm(`确认导入？\n文件大小: ${sizeKB}KB\n模式: ${importMode === 'overwrite' ? '覆盖' : '增量'}\n\n覆盖模式将替换所有现有数据！`)) {
+                        return;
+                    }
+
+                    // 导入前先做一次自动备份
+                    performAutoBackup();
+                    showToast('正在导入数据，请稍候...');
 
                     // 检测是否为新版完整备份格式 (version >= 2)
                     if (d.version && d.version >= 2 && d.store) {
@@ -7539,14 +7832,13 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
             }
             
             const listDiv = document.getElementById('bingo-selection-list');
-            listDiv.innerHTML = '';
-            
-            activeProjects.forEach(p => {
+
+            listDiv.innerHTML = activeProjects.map(p => {
                 const total = p.tasks.length;
                 const done = p.tasks.filter(t => t.completed).length;
                 const progress = Math.round((done / total) * 100);
-                
-                listDiv.innerHTML += `
+
+                return `
                     <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;" onclick="confirmAiToolSendBingo(${p.id})">
                         <div style="flex:1; cursor:pointer;">
                             <div style="font-weight:bold;">${p.theme}</div>
@@ -7555,8 +7847,8 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                         <button class="btn-sec" style="width:auto; padding:4px 10px; font-size:0.7rem;">选择</button>
                     </div>
                 `;
-            });
-            
+            }).join('');
+
             const modal = document.getElementById('modal-select-bingo');
             const title = modal.querySelector('h3');
             if(title) title.innerText = "选择要注入的任务卡";
@@ -7789,14 +8081,13 @@ ${searchResultsText}
             }
             
             const listDiv = document.getElementById('bingo-selection-list');
-            listDiv.innerHTML = '';
-            
-            activeProjects.forEach(p => {
+
+            listDiv.innerHTML = activeProjects.map(p => {
                 const total = p.tasks.length;
                 const done = p.tasks.filter(t => t.completed).length;
                 const progress = Math.round((done / total) * 100);
-                
-                listDiv.innerHTML += `
+
+                return `
                     <div style="padding:10px; border-bottom:1px solid rgba(0,0,0,0.05); display:flex; align-items:center; gap:10px;" onclick="confirmToolSendBingo(${p.id})">
                         <div style="flex:1; cursor:pointer;">
                             <div style="font-weight:bold;">${p.theme}</div>
@@ -7805,8 +8096,8 @@ ${searchResultsText}
                         <button class="btn-sec" style="width:auto; padding:4px 10px; font-size:0.7rem;">选择</button>
                     </div>
                 `;
-            });
-            
+            }).join('');
+
             const modal = document.getElementById('modal-select-bingo');
             const title = modal.querySelector('h3');
             if(title) title.innerText = "选择要注入的任务卡";
@@ -9116,14 +9407,14 @@ ${contextText}`;
                 list.innerHTML = '<div style="text-align:center; opacity:0.5; margin-top:20px;">暂无长期记忆。聊得多了就会有的。</div>';
             } else {
                 // Reverse to show newest first
-                [...currentChatCharacter.longTermMemory].reverse().forEach((mem, index) => {
+                list.innerHTML = [...currentChatCharacter.longTermMemory].reverse().map((mem, index) => {
                     // mem string format: [Date] content
                     const match = mem.match(/^\[(.*?)\]\s*(.*)/);
                     let time = '', content = mem;
                     if(match) { time = match[1]; content = match[2]; }
                     const realIndex = currentChatCharacter.longTermMemory.length - 1 - index;
-                    
-                    list.innerHTML += `
+
+                    return `
                         <div style="background:rgba(0,0,0,0.03); padding:12px; border-radius:10px; margin-bottom:10px; border-left:3px solid var(--accent);">
                             <div style="font-size:0.7rem; opacity:0.5; margin-bottom:5px;">${time}</div>
                             <div style="white-space: pre-wrap; outline:none;" contenteditable="true" onblur="updateMemory(${realIndex}, this)">${content}</div>
@@ -9133,7 +9424,7 @@ ${contextText}`;
                             </div>
                         </div>
                     `;
-                });
+                }).join('');
             }
             const memModal = document.getElementById('modal-memory-library');
             memModal.classList.add('active');
@@ -9831,6 +10122,32 @@ Keep it short and natural. Don't mention you are an AI.`;
             }, 3000);
         }
 
+        // ==================== Escape 键关闭模态框 ====================
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                // 找到最上层的 active 模态框并关闭
+                const activeModals = document.querySelectorAll('.modal.active');
+                if (activeModals.length > 0) {
+                    // 按 z-index 降序，关闭最上层的那个
+                    let topModal = activeModals[activeModals.length - 1];
+                    let topZ = -1;
+                    activeModals.forEach(m => {
+                        const z = parseInt(getComputedStyle(m).zIndex) || 0;
+                        if (z > topZ) { topZ = z; topModal = m; }
+                    });
+                    closeModal(topModal.id);
+                    e.preventDefault();
+                } else {
+                    // 没有模态框时，关闭侧边栏
+                    const sidebar = document.getElementById('sidebar');
+                    if (sidebar && sidebar.classList.contains('open')) {
+                        closeSidebar();
+                        e.preventDefault();
+                    }
+                }
+            }
+        });
+
         window.addEventListener('DOMContentLoaded', () => {
             init();
             startBackgroundLoop();
@@ -9942,10 +10259,7 @@ ${taskList}
 
             // 渲染角色列表
             const listDiv = document.getElementById('character-select-list');
-            listDiv.innerHTML = '';
-
-            // 添加 AI 助手选项
-            listDiv.innerHTML += `
+            let charSelectHtml = `
                 <div class="mini-card" onclick="shareToAiAssistant()" style="display:flex; align-items:center; gap:12px; padding:12px; cursor:pointer; margin-bottom:8px; border-left: 4px solid var(--accent);">
                     <img src="data:image/webp;base64,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BMYhcYBdTRiotB9FDxps/nyt5rEjV0jT6upGRixAXTfAU/lGADFIpGAXU1ATGIXGAXU1ATGH9CpA0wtLIxMT0Yc+YvWvJTzB47pjEXkyrKigfkgwi20zupqAmMQuMAupqAmMQpr1JY6OrZFCzdbZeiQNMxgDrKqagLGAy3tqzK5i4wC6moCYxC4wC6moCYwdn7mZ6lXVDTJZzwtNS5Q2LmiuAp/AtwviLbTO6moCYxC4wC6moCYxC4vR8BQM9Q3+WbfjbxFqSwFIoRQPyQYRbaZ3U1ATGIXGAXU1ATGIXGAXECt9wvaACrrBI1iPKF3Bzvi6g67HcD8ftM7qagJjELjALqagJjELjALqW68wgvSFAAWUU+/E8rqP6U9uX5XMXGAXU1ATGIXGAXU1ATGIXGAXFr0dagtFpnyKKK9vAXU1ATGIXGAXU1ATGIXGAXU1ATGIU1hF0ZmVCr4xiPifHsp/AqeI7qagJjELjALqagJjELjALqagJjELckbDlD6/BdVvkHE37i4BXmMQuMAupqAmMQuMAupqAmMQuMAupacsyaeun2iOslrFUop8L/E8rmLjALqagJjELjALqagJjELjALpsIaJ1/1srmKYF81RFndTUBMYhcYBdTUBMYhcYBdTUBMYhcX/bxQgo6Q7DiSmz9cqF1NQExiFxgF1NQExiFxgF1NQExiFxgFxAiz65u6ulM6ILb8WIF1NQExiFxgF1NQExiFxgF1NQExiFxgFxIu+w+j4iEMj/80BP5XMXGAXU1ATGIXGAXU1ATGIXGAXU1ATFRpFEKex14PS7gdATY0QuMAupqAmMQuMAupqAmMQuMAupqAmMQpw7OGEFzmy15jELjALqagJjELjALqagJjELjALqagJjCAXpRX477VmVzFxgF1NQExiFxgF1NQExiFxgF1NQExh/MrY4JzV/xw3OzupqAmMQuMAupqAmMQuMAupqAmMQuMAupori8omUXpt+8yuYuMAupqAmMQuMAupqAmMQuMAupqAmMP9yV7Feel0s6zMrmLjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJjELjALqagJioAAP7FzQAAAAAAAAAAAAAABdGJPp1NV+zG2bLCQXvIX5kF2Jbm4aNgxXXPsRu5JXnFJbB69pUT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" style="width:45px; height:45px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
                     <div style="flex:1;">
@@ -9956,9 +10270,9 @@ ${taskList}
                 </div>
             `;
 
-            characters.forEach(char => {
+            charSelectHtml += characters.map(char => {
                 const avatar = char.avatar || 'https://via.placeholder.com/40';
-                listDiv.innerHTML += `
+                return `
                     <div class="mini-card" onclick="shareToCharacter('${char.id}')" style="display:flex; align-items:center; gap:12px; padding:12px; cursor:pointer; margin-bottom:8px;">
                         <img src="${avatar}" style="width:45px; height:45px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
                         <div style="flex:1;">
@@ -9968,7 +10282,8 @@ ${taskList}
                         <div style="color:var(--accent);">→</div>
                     </div>
                 `;
-            });
+            }).join('');
+            listDiv.innerHTML = charSelectHtml;
 
             // 打开弹窗
             document.getElementById('modal-select-character').classList.add('active');

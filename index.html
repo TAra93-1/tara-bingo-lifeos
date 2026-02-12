@@ -1054,6 +1054,18 @@
                         </div>
                     </div>
                     <div class="input-group">
+                        <label>语义匹配阈值</label>
+                        <input type="range" id="character-semantic-threshold" min="0.3" max="0.9" step="0.05" value="0.55" oninput="document.getElementById('semantic-threshold-value').textContent=this.value">
+                        <div style="display:flex; justify-content:space-between; font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                            <span>宽松 0.3</span>
+                            <span id="semantic-threshold-value">0.55</span>
+                            <span>严格 0.9</span>
+                        </div>
+                        <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
+                            💡 紫灯语义条目的激活阈值。越低越容易激活，越高越严格只激活高度相关的条目。建议：0.5-0.65
+                        </div>
+                    </div>
+                    <div class="input-group">
                         <label>挂载记忆条数</label>
                         <input type="number" id="character-detail-pinned-memory" value="0" min="0" max="20" oninput="updateTokenEstimate()">
                         <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
@@ -1312,6 +1324,10 @@
                 <button type="button" id="trigger-keyword-btn" class="btn-sec active" style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="setTriggerMode('keyword')">
                     <span style="width:12px; height:12px; border-radius:50%; background:#4CAF50; box-shadow:0 0 6px #4CAF50;"></span>
                     <span>关键词</span>
+                </button>
+                <button type="button" id="trigger-semantic-btn" class="btn-sec" style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="setTriggerMode('semantic')">
+                    <span style="width:12px; height:12px; border-radius:50%; background:#9C27B0; box-shadow:0 0 6px #9C27B0;"></span>
+                    <span>语义</span>
                 </button>
             </div>
         </div>
