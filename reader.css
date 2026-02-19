@@ -1,0 +1,500 @@
+        /* ==================== LifeOS 图书馆样式 ==================== */
+
+        /* 图书馆导航项 */
+        .library-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 0.65rem;
+            color: var(--text);
+            opacity: 0.4;
+            gap: 4px;
+            transition: all 0.2s;
+            cursor: pointer;
+            padding: 5px;
+        }
+        .library-nav-item.active {
+            opacity: 1;
+            transform: translateY(-2px);
+            font-weight: bold;
+            color: var(--accent);
+        }
+        .library-nav-item:hover {
+            opacity: 0.7;
+        }
+
+        /* 图书馆Tab内容 */
+        .library-tab-content {
+            animation: fadeIn 0.3s ease;
+        }
+
+        /* 书籍卡片 */
+        .book-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 4px solid var(--accent);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        .book-card:hover {
+            transform: translateX(5px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+        .book-card:active {
+            transform: scale(0.98);
+        }
+        .book-card-cover {
+            width: 60px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--accent), var(--highlight));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .book-card-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .book-card-title {
+            font-weight: bold;
+            font-size: 1rem;
+            margin-bottom: 5px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .book-card-meta {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            margin-bottom: 3px;
+        }
+        .book-card-progress {
+            width: 100%;
+            height: 4px;
+            background: rgba(0,0,0,0.1);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        .book-card-progress-bar {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.3s;
+        }
+
+        /* 阅读室卡片 */
+        .reading-room-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .reading-room-card:hover {
+            background: rgba(0,0,0,0.03);
+            transform: translateX(5px);
+        }
+        .reading-room-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid var(--accent);
+        }
+        .reading-room-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .reading-room-name {
+            font-weight: bold;
+            font-size: 0.95rem;
+            margin-bottom: 4px;
+        }
+        .reading-room-desc {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* 笔记按书分组 - 手风琴 */
+        .note-book-group {
+            margin-bottom: 12px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--card-bg);
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(var(--accent-rgb), 0.1);
+        }
+        .note-book-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 15px;
+            cursor: pointer;
+            transition: background 0.2s;
+            user-select: none;
+        }
+        .note-book-header:hover {
+            background: rgba(var(--accent-rgb), 0.05);
+        }
+        .note-book-header:active {
+            background: rgba(var(--accent-rgb), 0.1);
+        }
+        .note-book-header .arrow {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            opacity: 0.4;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            flex-shrink: 0;
+        }
+        .note-book-header.expanded .arrow {
+            transform: rotate(90deg);
+        }
+        .note-book-header .book-icon {
+            width: 20px;
+            height: 20px;
+            stroke: var(--accent);
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            flex-shrink: 0;
+        }
+        .note-book-header .book-title {
+            flex: 1;
+            font-weight: bold;
+            font-size: 0.9rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+        .note-book-header .note-count {
+            font-size: 0.7rem;
+            opacity: 0.5;
+            flex-shrink: 0;
+            padding: 2px 8px;
+            background: rgba(var(--accent-rgb), 0.08);
+            border-radius: 10px;
+        }
+        .note-book-items {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .note-book-items.expanded {
+            max-height: 5000px;
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .note-book-items .note-item {
+            padding: 12px 15px;
+            border-top: 1px solid rgba(128, 128, 128, 0.1);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .note-book-items .note-item:hover {
+            background: rgba(var(--accent-rgb), 0.03);
+        }
+        .note-book-items .note-item:active {
+            background: rgba(var(--accent-rgb), 0.08);
+        }
+
+        /* 阅读器工具栏 */
+        .reader-toolbar {
+            backdrop-filter: blur(10px);
+        }
+
+        /* 阅读器工具按钮 */
+        .reader-tool-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        .reader-tool-btn:hover {
+            background: rgba(0,0,0,0.05);
+        }
+        .reader-tool-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* 阅读器悬浮菜单项 */
+        .reader-float-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+        .reader-float-menu-item:hover {
+            background: rgba(0,0,0,0.05);
+        }
+        .reader-float-menu-item:active {
+            transform: scale(0.98);
+        }
+
+        /* 阅读内容文字选择样式 */
+        #reader-content,
+        #reader-content * {
+            -webkit-user-select: text !important;
+            user-select: text !important;
+        }
+        #reader-content::selection,
+        #reader-content *::selection {
+            background: rgba(var(--accent-rgb, 139, 90, 43), 0.3);
+        }
+
+        /* 阅读器章节标题样式 */
+        .reader-chapter-heading {
+            font-size: 1.6em;
+            font-weight: 800;
+            text-align: center;
+            margin: 2.5em 0 1.5em;
+            padding: 1.2em 0;
+            border-top: 1px solid rgba(128,128,128,0.2);
+            border-bottom: 1px solid rgba(128,128,128,0.2);
+            letter-spacing: 0.05em;
+            line-height: 1.4;
+            color: var(--text);
+        }
+        .reader-chapter-heading:first-child {
+            margin-top: 0.5em;
+        }
+
+        /* 阅读器脚注链接样式 */
+        .reader-footnote-link {
+            color: var(--accent);
+            cursor: pointer;
+            text-decoration: none;
+            border-bottom: 1px dashed var(--accent);
+            font-size: 0.85em;
+            vertical-align: super;
+            padding: 0 1px;
+        }
+        .reader-footnote-link:hover {
+            opacity: 0.8;
+        }
+
+        /* 脚注跳转目标闪烁效果 */
+        .reader-link-target-flash {
+            animation: readerLinkFlash 2s ease-out;
+        }
+        @keyframes readerLinkFlash {
+            0%, 20% { background-color: rgba(var(--accent-rgb, 139, 90, 43), 0.3); }
+            100% { background-color: transparent; }
+        }
+
+        /* 阅读器翻页模式 */
+        #reader-content.reader-page-mode {
+            overflow-x: auto !important;
+            overflow-y: hidden !important;
+            column-fill: auto;
+            /* column-gap 由 JS 动态设置 = 左右 padding 之和 */
+            scroll-behavior: smooth;
+            /* 不设 scroll-snap-type，由 JS 手动 snap 避免冲突 */
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            hyphens: auto;
+            box-sizing: border-box;
+            /* 隐藏水平滚动条，防止它占用空间导致列宽计算偏差 */
+            scrollbar-width: none;       /* Firefox */
+            -ms-overflow-style: none;    /* IE/Edge */
+        }
+        #reader-content.reader-page-mode::-webkit-scrollbar {
+            display: none;               /* Chrome/Safari */
+        }
+        #reader-content.reader-page-mode p,
+        #reader-content.reader-page-mode .reader-chapter-heading {
+            break-inside: auto;
+            max-width: 100%;
+        }
+        #reader-content.reader-page-mode img,
+        #reader-content.reader-page-mode video,
+        #reader-content.reader-page-mode table {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* 文字选择工具栏 */
+        .text-selection-toolbar {
+            position: fixed;
+            background: var(--card-bg);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            padding: 8px;
+            display: none;
+            z-index: 8000;
+            gap: 5px;
+        }
+        .text-selection-toolbar.active {
+            display: flex;
+        }
+        .text-selection-btn {
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .text-selection-btn:hover {
+            background: rgba(0,0,0,0.1);
+        }
+        .text-selection-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* 笔记高亮 - 多颜色支持 */
+        .reading-highlight {
+            background: rgba(255, 235, 59, 0.3);
+            cursor: pointer;
+            border-bottom: 2px solid rgba(255, 193, 7, 0.5);
+            border-radius: 2px;
+            transition: background 0.2s;
+        }
+        .reading-highlight:hover {
+            background: rgba(255, 235, 59, 0.5);
+        }
+        /* 黄色（默认） */
+        .reading-highlight[data-color="yellow"], .reading-highlight:not([data-color]) {
+            background: rgba(255, 235, 59, 0.3);
+            border-bottom-color: rgba(255, 193, 7, 0.5);
+        }
+        .reading-highlight[data-color="yellow"]:hover, .reading-highlight:not([data-color]):hover {
+            background: rgba(255, 235, 59, 0.5);
+        }
+        /* 粉色 */
+        .reading-highlight[data-color="pink"] {
+            background: rgba(255, 105, 135, 0.25);
+            border-bottom-color: rgba(233, 30, 99, 0.5);
+        }
+        .reading-highlight[data-color="pink"]:hover {
+            background: rgba(255, 105, 135, 0.4);
+        }
+        /* 蓝色 */
+        .reading-highlight[data-color="blue"] {
+            background: rgba(100, 181, 246, 0.25);
+            border-bottom-color: rgba(33, 150, 243, 0.5);
+        }
+        .reading-highlight[data-color="blue"]:hover {
+            background: rgba(100, 181, 246, 0.4);
+        }
+        /* 绿色 */
+        .reading-highlight[data-color="green"] {
+            background: rgba(129, 199, 132, 0.25);
+            border-bottom-color: rgba(76, 175, 80, 0.5);
+        }
+        .reading-highlight[data-color="green"]:hover {
+            background: rgba(129, 199, 132, 0.4);
+        }
+        /* 紫色 */
+        .reading-highlight[data-color="purple"] {
+            background: rgba(186, 104, 200, 0.25);
+            border-bottom-color: rgba(156, 39, 176, 0.5);
+        }
+        .reading-highlight[data-color="purple"]:hover {
+            background: rgba(186, 104, 200, 0.4);
+        }
+        /* 笔记标记（虚线下划线） */
+        .reading-note-mark {
+            border-bottom: 2px dashed rgba(255, 152, 0, 0.6);
+            cursor: pointer;
+            border-radius: 2px;
+        }
+        .reading-note-mark:hover {
+            background: rgba(255, 152, 0, 0.1);
+        }
+        /* 高亮颜色选择器 */
+        .highlight-color-picker {
+            display: none;
+            position: fixed;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            z-index: 9999;
+            padding: 10px;
+            gap: 8px;
+        }
+        .highlight-color-picker.active {
+            display: flex;
+            align-items: center;
+        }
+        .highlight-color-dot {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .highlight-color-dot:hover {
+            transform: scale(1.2);
+        }
+        .highlight-color-dot.active {
+            border-color: var(--text);
+        }
+        .highlight-color-dot[data-color="yellow"] { background: rgba(255, 235, 59, 0.7); }
+        .highlight-color-dot[data-color="pink"] { background: rgba(255, 105, 135, 0.7); }
+        .highlight-color-dot[data-color="blue"] { background: rgba(100, 181, 246, 0.7); }
+        .highlight-color-dot[data-color="green"] { background: rgba(129, 199, 132, 0.7); }
+        .highlight-color-dot[data-color="purple"] { background: rgba(186, 104, 200, 0.7); }
+        .highlight-remove-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid rgba(198, 40, 40, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            color: #c62828;
+            transition: transform 0.15s;
+            background: rgba(198, 40, 40, 0.1);
+        }
+        .highlight-remove-btn:hover {
+            transform: scale(1.2);
+        }
+
+        /* 响应式调整 */
+        @media (max-width: 480px) {
+            .book-card-cover {
+                width: 50px;
+                height: 70px;
+                font-size: 1.5rem;
+            }
+            .book-card-title {
+                font-size: 0.9rem;
+            }
+        }
+

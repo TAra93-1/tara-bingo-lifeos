@@ -1689,6 +1689,46 @@
             background: rgba(var(--accent-rgb, 139, 90, 43), 0.3);
         }
 
+        /* 阅读器章节标题样式 */
+        .reader-chapter-heading {
+            font-size: 1.6em;
+            font-weight: 800;
+            text-align: center;
+            margin: 2.5em 0 1.5em;
+            padding: 1.2em 0;
+            border-top: 1px solid rgba(128,128,128,0.2);
+            border-bottom: 1px solid rgba(128,128,128,0.2);
+            letter-spacing: 0.05em;
+            line-height: 1.4;
+            color: var(--text);
+        }
+        .reader-chapter-heading:first-child {
+            margin-top: 0.5em;
+        }
+
+        /* 阅读器脚注链接样式 */
+        .reader-footnote-link {
+            color: var(--accent);
+            cursor: pointer;
+            text-decoration: none;
+            border-bottom: 1px dashed var(--accent);
+            font-size: 0.85em;
+            vertical-align: super;
+            padding: 0 1px;
+        }
+        .reader-footnote-link:hover {
+            opacity: 0.8;
+        }
+
+        /* 脚注跳转目标闪烁效果 */
+        .reader-link-target-flash {
+            animation: readerLinkFlash 2s ease-out;
+        }
+        @keyframes readerLinkFlash {
+            0%, 20% { background-color: rgba(var(--accent-rgb, 139, 90, 43), 0.3); }
+            100% { background-color: transparent; }
+        }
+
         /* 阅读器翻页模式 */
         #reader-content.reader-page-mode {
             overflow-x: auto !important;
@@ -1696,12 +1736,20 @@
             column-fill: auto;
             /* column-gap 由 JS 动态设置 = 左右 padding 之和 */
             scroll-behavior: smooth;
-            scroll-snap-type: x mandatory;
+            /* 不设 scroll-snap-type，由 JS 手动 snap 避免冲突 */
             word-break: break-word;
             overflow-wrap: anywhere;
             hyphens: auto;
+            box-sizing: border-box;
+            /* 隐藏水平滚动条，防止它占用空间导致列宽计算偏差 */
+            scrollbar-width: none;       /* Firefox */
+            -ms-overflow-style: none;    /* IE/Edge */
         }
-        #reader-content.reader-page-mode p {
+        #reader-content.reader-page-mode::-webkit-scrollbar {
+            display: none;               /* Chrome/Safari */
+        }
+        #reader-content.reader-page-mode p,
+        #reader-content.reader-page-mode .reader-chapter-heading {
             break-inside: auto;
             max-width: 100%;
         }

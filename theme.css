@@ -1,0 +1,263 @@
+        /* --- [Vesper] 视觉核心层 (Visual Core) --- */
+        
+        /* 1. 默认主题 (Default - 经典牛皮纸) */
+        :root {
+            --bg: #F0EAD6;
+            --bg-rgb: 240, 234, 214;
+            --card-bg: #FFFAF0;
+            --text: #4A403A;
+            --accent: #8B5A2B;
+            --accent-rgb: 139, 90, 43;
+            --highlight: #CD853F;
+            --completed: #6B8E23;
+            --daily: #7B68EE;
+            --deadline: #C0392B;
+            --gold: #F1C40F;
+            --shadow: 0 4px 20px rgba(74, 64, 58, 0.08);
+            --mystery-1: #bcaaa4;
+            --mystery-2: #8d6e63;
+        }
+
+        /* 2. 无声 (Silent) - 极致的黑与荧光薄荷 */
+        [data-theme="silent"] {
+            --bg: #000000;
+            --bg-rgb: 0, 0, 0;
+            --card-bg: #1A1A1A;
+            --text: #F6F6F6;
+            --accent: #CFFFE2;
+            --accent-rgb: 207, 255, 226;
+            --highlight: #A2D5C6;
+            --completed: #A2D5C6;
+            --daily: #CFFFE2;
+            --deadline: #FF6B6B;
+            --gold: #E0E0E0;
+            --shadow: 0 4px 20px rgba(255, 255, 255, 0.05);
+            --mystery-1: #333;
+            --mystery-2: #111;
+        }
+
+        /* 3. 白雾 (Fog) - 工业冷淡风 */
+        [data-theme="fog"] {
+            --bg: #EFF2F2;
+            --bg-rgb: 239, 242, 242;
+            --card-bg: #FFFFFF;
+            --text: #22303E;
+            --accent: #5D6973;
+            --accent-rgb: 93, 105, 115;
+            --highlight: #B7BEBD;
+            --completed: #5D6973;
+            --daily: #78909C;
+            --deadline: #D32F2F;
+            --gold: #FFB74D;
+            --shadow: 0 4px 15px rgba(34, 48, 62, 0.05);
+            --mystery-1: #CFD8DC;
+            --mystery-2: #B0BEC5;
+        }
+
+        /* 4. 蓝白 (Dream) - 柔软的云端 */
+        [data-theme="dream"] {
+            --bg: #DFF2FC;
+            --bg-rgb: 223, 242, 252;
+            --card-bg: #FCF8E7;
+            --text: #546E7A;
+            --accent: #95C2E2;
+            --accent-rgb: 149, 194, 226;
+            --highlight: #A6D0F1;
+            --completed: #81D4FA;
+            --daily: #B39DDB;
+            --deadline: #F48FB1;
+            --gold: #FFE082;
+            --shadow: 0 4px 15px rgba(149, 194, 226, 0.15);
+            --mystery-1: #E1F5FE;
+            --mystery-2: #B3E5FC;
+        }
+
+        /* 5. 青柠 (Lime) - 治愈的植物系 */
+        [data-theme="lime"] {
+            --bg: #E3F0E5;
+            --bg-rgb: 227, 240, 229;
+            --card-bg: #FFFFFF;
+            --text: #33691E;
+            --accent: #81C784;
+            --accent-rgb: 129, 199, 132;
+            --highlight: #C8E6CA;
+            --completed: #66BB6A;
+            --daily: #4DB6AC;
+            --deadline: #FF7043;
+            --gold: #DCE775;
+            --shadow: 0 4px 15px rgba(129, 199, 132, 0.1);
+            --mystery-1: #DCEDC8;
+            --mystery-2: #C5E1A5;
+        }
+
+        /* 6. 锈湖·根源 (Rusty Roots) - 腐烂的苔藓与旧羊皮纸 */
+        [data-theme="roots"] {
+            --bg: #2a1215;
+            --bg-rgb: 42, 18, 21;
+            --card-bg: #3d2022;
+            --text: #e3dccb;
+            --accent: #8c3b3b;
+            --accent-rgb: 140, 59, 59;
+            --highlight: #c45c5c;
+            --completed: #5c6b50;
+            --daily: #a09882;
+            --deadline: #c45c5c;
+            --gold: #b8a468;
+            --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            --mystery-1: #4a2828;
+            --mystery-2: #3d2022;
+        }
+        [data-theme="roots"] body,
+        [data-theme="roots"] .sheet,
+        [data-theme="roots"] .mini-card,
+        [data-theme="roots"] .cell,
+        [data-theme="roots"] h1, [data-theme="roots"] h2, [data-theme="roots"] h3, [data-theme="roots"] h4,
+        [data-theme="roots"] p, [data-theme="roots"] span, [data-theme="roots"] div, [data-theme="roots"] label {
+            font-family: 'Noto Serif SC', 'JetBrains Mono', serif !important;
+        }
+        [data-theme="roots"] .app-name,
+        [data-theme="roots"] .sys-clock,
+        [data-theme="roots"] .balance-pill {
+            font-family: 'JetBrains Mono', 'Noto Serif SC', serif !important;
+        }
+
+        /* 7. 核磁共振 (MRI) - 克莱因蓝的理智监狱 × 赛博朋克拼贴 */
+        [data-theme="mri"] {
+            --bg: #002FA7;
+            --bg-rgb: 0, 47, 167;
+            --card-bg: #001A5E;
+            --text: #FFFFFF;
+            --accent: #00FFFF;
+            --accent-rgb: 0, 255, 255;
+            --highlight: #FF00FF;
+            --completed: #00FFFF;
+            --daily: #FF00FF;
+            --deadline: #FF003C;
+            --gold: #CCFF00;
+            --shadow: 5px 5px 0px #00FFFF, -5px -5px 0px #FF00FF;
+            --mystery-1: #001247;
+            --mystery-2: #000D33;
+            /* MRI 专属变量 */
+            --mri-alert-red: #FF003C;
+            --mri-glitch-cyan: #00FFFF;
+            --mri-punk-pink: #FF00FF;
+            --mri-acid-green: #CCFF00;
+            --mri-chrome: #C0C0C0;
+        }
+
+        /* MRI 主题：强制无圆角 */
+        [data-theme="mri"] .mini-card,
+        [data-theme="mri"] .sheet,
+        [data-theme="mri"] .cell,
+        [data-theme="mri"] input,
+        [data-theme="mri"] select,
+        [data-theme="mri"] textarea,
+        [data-theme="mri"] .btn,
+        [data-theme="mri"] [style*="border-radius"] {
+            border-radius: 0px !important;
+        }
+
+        /* MRI 主题：按钮 hover 酸性反转 */
+        [data-theme="mri"] .btn:hover,
+        [data-theme="mri"] button:hover {
+            background-color: #CCFF00 !important;
+            color: #000000 !important;
+            transform: skewX(-5deg);
+            transition: all 0.15s ease;
+        }
+
+        /* MRI 主题：色散阴影卡片 */
+        [data-theme="mri"] .mini-card {
+            box-shadow: 4px 4px 0px #00FFFF, -4px -4px 0px #FF00FF;
+            transition: all 0.2s ease;
+        }
+        [data-theme="mri"] .mini-card:hover {
+            box-shadow: 6px 6px 0px #00FFFF, -6px -6px 0px #FF00FF;
+            transform: translate(-2px, -2px);
+        }
+
+        /* MRI 主题：去掉全局网格点 + 不规则光晕纹理 */
+        [data-theme="mri"] body {
+            background-image: none !important;
+            background-size: unset !important;
+        }
+        [data-theme="mri"] body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background:
+                radial-gradient(ellipse 600px 400px at 15% 20%, rgba(0, 255, 255, 0.04) 0%, transparent 70%),
+                radial-gradient(ellipse 500px 600px at 85% 75%, rgba(255, 0, 255, 0.03) 0%, transparent 70%),
+                radial-gradient(ellipse 400px 300px at 50% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 60%),
+                radial-gradient(ellipse 300px 500px at 30% 80%, rgba(0, 255, 255, 0.025) 0%, transparent 65%),
+                radial-gradient(ellipse 350px 250px at 70% 15%, rgba(255, 0, 255, 0.02) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* MRI 主题：状态栏 & 导航栏强化 */
+        [data-theme="mri"] .status-bar {
+            background: #000000 !important;
+            border-bottom: 2px solid #00FFFF !important;
+        }
+        [data-theme="mri"] .nav-bar {
+            background: #000000 !important;
+            border-top: 2px solid #FF00FF !important;
+        }
+        [data-theme="mri"] .nav-item.active {
+            color: #CCFF00 !important;
+        }
+
+        /* MRI 主题：文字强调用朋克粉 */
+        [data-theme="mri"] strong,
+        [data-theme="mri"] b {
+            color: #FF00FF;
+        }
+        [data-theme="mri"] em,
+        [data-theme="mri"] i:not(.nav-item i) {
+            color: #00FFFF;
+            font-style: normal;
+        }
+
+        /* MRI 主题：输入框聚焦发光 */
+        [data-theme="mri"] input:focus,
+        [data-theme="mri"] textarea:focus,
+        [data-theme="mri"] select:focus {
+            box-shadow: 0 0 10px #00FFFF, 0 0 20px rgba(0, 255, 255, 0.3) !important;
+            border-color: #00FFFF !important;
+        }
+
+        /* MRI 主题：滚动条 */
+        [data-theme="mri"] ::-webkit-scrollbar {
+            width: 6px;
+        }
+        [data-theme="mri"] ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        [data-theme="mri"] ::-webkit-scrollbar-thumb {
+            background: #00FFFF;
+            border-radius: 0;
+        }
+
+        /* SVG 图标统一样式 */
+        .ico {
+            display: inline-block;
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.125em;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        /* 全局平滑过渡 */
+        body, .view, .mini-card, .btn, .status-bar, .nav-bar, .cell, input, select, textarea {
+            transition: background 0.4s ease, color 0.4s ease, border-color 0.4s ease;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; outline: none; }
+        body { font-family: 'JetBrains Mono', 'Noto Serif SC', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 100px; padding-top: 60px; }
+        body.no-scroll { overflow: hidden; height: 100vh; touch-action: none; }
+

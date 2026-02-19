@@ -12419,6 +12419,8 @@ ${taskList}
 
                 if (parsedEpub) {
                     bookData.toc = parsedEpub.toc || [];
+                    if (parsedEpub.anchorMap) bookData.anchorMap = parsedEpub.anchorMap;
+                    if (parsedEpub.spineMap) bookData.spineMap = parsedEpub.spineMap;
                 }
 
                 await dbHelper.safePut('libraryBooks', bookData, '书籍');
@@ -12693,11 +12695,49 @@ ${taskList}
                     };
                 });
             }
+            // 构建全局 anchorMap（脚注跳转用）
+            const globalAnchorMap = {};
+            Object.keys(spineMap).forEach(spineHref => {
+                const entry = spineMap[spineHref];
+                Object.keys(entry.anchors || {}).forEach(id => {
+                    globalAnchorMap[`${spineHref}#${id}`] = entry.anchors[id];
+                    globalAnchorMap[`#${id}`] = entry.anchors[id]; // 同文件内引用
+                });
+            });
+
             return {
                 title: title || file.name.replace(/\.[^.]+$/, ''),
                 content: content || '',
-                toc: toc
+                toc: toc,
+                anchorMap: globalAnchorMap,
+                spineMap: spineMap
             };
+        }
+
+        // 提取元素文本并保留 <a> 链接标记
+        function extractTextWithLinks(el) {
+            let result = '';
+            el.childNodes.forEach(node => {
+                if (node.nodeType === 3) { // TEXT_NODE
+                    result += node.textContent;
+                } else if (node.nodeType === 1) { // ELEMENT_NODE
+                    const tag = node.tagName;
+                    if (tag === 'A') {
+                        const href = node.getAttribute('href') || '';
+                        const text = node.textContent || '';
+                        if (href && text.trim()) {
+                            result += `{{link:${href}:${text}}}`;
+                        } else {
+                            result += text;
+                        }
+                    } else if (tag === 'SUP' || tag === 'SUB' || tag === 'SPAN' || tag === 'EM' || tag === 'STRONG' || tag === 'I' || tag === 'B') {
+                        result += extractTextWithLinks(node); // 递归内联元素
+                    } else {
+                        result += node.textContent || '';
+                    }
+                }
+            });
+            return result;
         }
 
         function extractEpubParagraphs(body) {
@@ -12779,10 +12819,11 @@ ${taskList}
 
                 collectIds(el);
 
-                // 标准块级标签 - 直接提取
+                // 标准块级标签 - 直接提取（保留链接标记）
                 if (blockTags.has(el.tagName)) {
                     processedNodes.add(el);
-                    const text = normalizeEpubText(el.textContent || '');
+                    const raw = extractTextWithLinks(el);
+                    const text = normalizeEpubText(raw);
                     if (text) {
                         addParagraph(el, text);
                         markAncestors(el);
@@ -12804,9 +12845,10 @@ ${taskList}
                             addParagraph(el, directText);
                         }
                     } else {
-                        // 叶子容器，没有块级子元素 - 直接提取全部文本
+                        // 叶子容器，没有块级子元素 - 直接提取全部文本（保留链接标记）
                         processedNodes.add(el);
-                        const text = normalizeEpubText(el.textContent || '');
+                        const raw = extractTextWithLinks(el);
+                        const text = normalizeEpubText(raw);
                         if (text) {
                             addParagraph(el, text);
                             markAncestors(el);
@@ -12823,7 +12865,7 @@ ${taskList}
                 }
             };
 
-            // 获取元素的直接文本节点内容（排除已处理的子元素）
+            // 获取元素的直接文本节点内容（排除已处理的子元素，保留链接标记）
             const getDirectTextContent = (el) => {
                 let text = '';
                 for (let i = 0; i < el.childNodes.length; i++) {
@@ -12832,7 +12874,17 @@ ${taskList}
                         text += child.textContent;
                     } else if (child.nodeType === 1 && !processedNodes.has(child) &&
                                !blockTags.has(child.tagName) && !containerTags.has(child.tagName)) {
-                        text += child.textContent || '';
+                        if (child.tagName === 'A') {
+                            const href = child.getAttribute('href') || '';
+                            const linkText = child.textContent || '';
+                            if (href && linkText.trim()) {
+                                text += `{{link:${href}:${linkText}}}`;
+                            } else {
+                                text += linkText;
+                            }
+                        } else {
+                            text += extractTextWithLinks(child);
+                        }
                     }
                 }
                 return normalizeEpubText(text);
@@ -12977,6 +13029,77 @@ ${taskList}
             }
         }
 
+        // 渲染段落文本，将 {{link:href:text}} 标记转为可点击链接
+        function renderParagraphWithLinks(text) {
+            // 先提取所有链接标记，替换为占位符
+            const links = [];
+            const placeholder = text.replace(/\{\{link:(.*?):(.*?)\}\}/g, (_, href, linkText) => {
+                const idx = links.length;
+                links.push({ href, text: linkText });
+                return `\x00LINK${idx}\x00`;
+            });
+            // 对剩余文本做 HTML 转义
+            let html = escapeHtml(placeholder);
+            // 还原链接占位符为可点击的 <a> 元素
+            html = html.replace(/\x00LINK(\d+)\x00/g, (_, idxStr) => {
+                const link = links[parseInt(idxStr, 10)];
+                if (!link) return '';
+                const safeHref = escapeHtml(link.href);
+                const safeText = escapeHtml(link.text);
+                return `<a class="reader-footnote-link" data-href="${safeHref}" onclick="handleReaderLinkClick(this); return false;">${safeText}</a>`;
+            });
+            return html;
+        }
+
+        // 处理阅读器内脚注链接点击
+        function handleReaderLinkClick(el) {
+            const href = el.dataset.href;
+            if (!currentBook || !href) return;
+            const anchorMap = currentBook.anchorMap;
+            if (!anchorMap) return;
+
+            // 尝试多种匹配方式
+            let targetIndex = null;
+
+            // 1. 直接匹配 href（如 #footnote1）
+            if (anchorMap[href] !== undefined) {
+                targetIndex = anchorMap[href];
+            }
+
+            // 2. 如果 href 不是以 # 开头，尝试加 #
+            if (targetIndex === null && !href.startsWith('#')) {
+                const withHash = '#' + href;
+                if (anchorMap[withHash] !== undefined) {
+                    targetIndex = anchorMap[withHash];
+                }
+            }
+
+            // 3. 遍历 spineMap 尝试匹配（处理相对路径）
+            if (targetIndex === null && currentBook.spineMap) {
+                for (const spineHref of Object.keys(currentBook.spineMap)) {
+                    const fullKey = `${spineHref}${href.startsWith('#') ? '' : '#'}${href}`;
+                    if (anchorMap[fullKey] !== undefined) {
+                        targetIndex = anchorMap[fullKey];
+                        break;
+                    }
+                }
+            }
+
+            if (targetIndex !== null) {
+                // 复用 scrollToParagraph 确保翻页模式下页面对齐
+                scrollToParagraph(targetIndex);
+                // 闪烁高亮效果
+                const contentEl = document.getElementById('reader-content');
+                if (contentEl) {
+                    const targetEl = contentEl.querySelector(`[data-paragraph="${targetIndex}"]`);
+                    if (targetEl) {
+                        targetEl.classList.add('reader-link-target-flash');
+                        setTimeout(() => targetEl.classList.remove('reader-link-target-flash'), 2000);
+                    }
+                }
+            }
+        }
+
         // 渲染阅读器内容
         function renderReaderContent() {
             try {
@@ -12987,9 +13110,13 @@ ${taskList}
 
                 // 将内容分段显示
                 const paragraphs = content.split('\n').filter(p => p.trim());
-                const html = paragraphs.map((p, index) =>
-                    `<p data-paragraph="${index}" style="margin-bottom:1em;">${escapeHtml(p)}</p>`
-                ).join('');
+                const html = paragraphs.map((p, index) => {
+                    if (p.startsWith('# ')) {
+                        const title = escapeHtml(p.substring(2));
+                        return `<div data-paragraph="${index}" class="reader-chapter-heading">${title}</div>`;
+                    }
+                    return `<p data-paragraph="${index}" style="margin-bottom:1em;">${renderParagraphWithLinks(p)}</p>`;
+                }).join('');
 
                 contentEl.innerHTML = html;
 
@@ -13027,10 +13154,13 @@ ${taskList}
                 const contentEl = document.getElementById('reader-content');
                 if (!contentEl) return;
 
-                // 先清除所有已有的高亮/笔记标记，恢复为纯文本
-                contentEl.querySelectorAll('p[data-paragraph]').forEach(p => {
-                    if (p.querySelector('.reading-highlight, .reading-note-mark')) {
-                        p.innerHTML = escapeHtml(p.textContent || '');
+                // 先清除所有已有的高亮/笔记标记，恢复为原始渲染
+                const allParagraphs = currentBook.content ? currentBook.content.split('\n').filter(p => p.trim()) : [];
+                contentEl.querySelectorAll('[data-paragraph]').forEach(el => {
+                    if (el.querySelector('.reading-highlight, .reading-note-mark')) {
+                        const idx = parseInt(el.dataset.paragraph, 10);
+                        const originalText = allParagraphs[idx] || '';
+                        el.innerHTML = renderParagraphWithLinks(originalText);
                     }
                 });
 
@@ -13052,7 +13182,7 @@ ${taskList}
                 });
 
                 Object.keys(grouped).forEach(key => {
-                    const paragraph = contentEl.querySelector(`p[data-paragraph="${key}"]`);
+                    const paragraph = contentEl.querySelector(`[data-paragraph="${key}"]`);
                     if (!paragraph) return;
                     renderHighlightsInParagraph(paragraph, grouped[key]);
                 });
@@ -13182,19 +13312,20 @@ ${taskList}
                 const scrollSize = readerMode === 'page'
                     ? (contentEl.scrollWidth - contentEl.clientWidth)
                     : (contentEl.scrollHeight - contentEl.clientHeight);
-                const position = scrollSize * (percentage / 100);
+                const rawPosition = scrollSize * (percentage / 100);
 
                 if (readerMode === 'page') {
-                    contentEl.scrollLeft = position;
-                } else {
-                    contentEl.scrollTop = position;
-                }
-                currentReadingPosition = position;
-                currentReadingPercentage = parseFloat(percentage);
-                if (readerMode === 'page') {
-                    snapReaderToPage();
+                    // 直接对齐到页面边界，避免中间态的非对齐 scrollLeft
+                    const step = getReaderPageStep(contentEl);
+                    const position = step > 0 ? Math.round(rawPosition / step) * step : rawPosition;
+                    contentEl.scrollLeft = Math.min(position, scrollSize);
+                    currentReadingPosition = contentEl.scrollLeft;
                     updatePageIndicator();
+                } else {
+                    contentEl.scrollTop = rawPosition;
+                    currentReadingPosition = rawPosition;
                 }
+                currentReadingPercentage = parseFloat(percentage);
 
             } catch (error) {
                 handleError(error, '跳转进度失败', ErrorLevel.ERROR);
@@ -13486,33 +13617,46 @@ ${taskList}
 
             if (readerMode === 'page') {
                 contentEl.classList.add('reader-page-mode');
+
+                // 先清除旧的列布局样式，让浏览器回到自然状态再测量
+                contentEl.style.columnWidth = '';
+                contentEl.style.columnGap = '';
+
+                const height = contentEl.clientHeight || contentEl.offsetHeight;
+                const clientW = contentEl.clientWidth;
+
+                // 读取当前实际 padding
                 const computed = window.getComputedStyle(contentEl);
                 const paddingLeft = parseFloat(computed.paddingLeft) || 0;
                 const paddingRight = parseFloat(computed.paddingRight) || 0;
-                const totalPadding = paddingLeft + paddingRight;
-                // 内容宽度 = 可视宽度 - 左右 padding
-                const rawWidth = contentEl.clientWidth - totalPadding;
-                // 像素对齐：向下取整到整数像素，避免亚像素导致的列偏移
-                const contentWidth = Math.max(1, Math.floor(rawWidth));
-                const height = contentEl.clientHeight || contentEl.offsetHeight;
+                // 确保左右 padding 对称（取较大值并取整）
+                const sidePadding = Math.ceil(Math.max(paddingLeft, paddingRight));
+                const totalPadding = sidePadding * 2;
+                contentEl.style.paddingLeft = `${sidePadding}px`;
+                contentEl.style.paddingRight = `${sidePadding}px`;
 
-                // column-gap 设为总 padding 值，这样:
-                // 滚动步长 = columnWidth + columnGap = contentWidth + totalPadding = clientWidth
-                // 每次翻页恰好滚动一个完整视口，不会看到相邻页的文字
+                // 重新测量 clientWidth（padding 可能变了）
+                const finalClientW = contentEl.clientWidth;
+                // 列宽 = clientWidth - padding，确保 columnWidth + columnGap === clientWidth
+                const contentWidth = finalClientW - totalPadding;
+
+                if (contentWidth <= 10) {
+                    requestAnimationFrame(applyReaderMode);
+                    return;
+                }
+
                 contentEl.style.columnWidth = `${contentWidth}px`;
                 contentEl.style.columnGap = `${totalPadding}px`;
                 contentEl.style.height = height ? `${height}px` : '';
                 contentEl.style.overflowX = 'auto';
                 contentEl.style.overflowY = 'hidden';
-
-                if (contentWidth <= 10) {
-                    requestAnimationFrame(applyReaderMode);
-                }
             } else {
                 contentEl.classList.remove('reader-page-mode');
                 contentEl.style.columnWidth = '';
                 contentEl.style.columnGap = '';
                 contentEl.style.height = '';
+                contentEl.style.paddingLeft = '';
+                contentEl.style.paddingRight = '';
                 contentEl.style.overflowX = 'hidden';
                 contentEl.style.overflowY = 'auto';
             }
@@ -13522,12 +13666,9 @@ ${taskList}
 
         function getReaderPageStep(contentEl) {
             if (!contentEl) return 0;
-            const computed = window.getComputedStyle(contentEl);
-            const columnWidth = parseFloat(computed.columnWidth);
-            const gap = parseFloat(computed.columnGap) || 0;
-            const width = Number.isFinite(columnWidth) && columnWidth > 0
-                ? columnWidth + gap
-                : (contentEl.clientWidth || contentEl.offsetWidth || 0);
+            // 设计上 columnWidth + columnGap === clientWidth，
+            // 直接用 clientWidth 作为步长最可靠，不受浏览器列宽微调影响
+            const width = contentEl.clientWidth || contentEl.offsetWidth || 0;
             return width > 0 ? width : 0;
         }
 
@@ -13561,7 +13702,7 @@ ${taskList}
             const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
             const current = contentEl.scrollLeft;
             const base = step > 0 ? Math.round(current / step) * step : current;
-            let target = base + (direction === 'prev' ? -step : step);
+            let target = Math.round(base + (direction === 'prev' ? -step : step));
             if (target < 0) target = 0;
             if (target > maxScroll) target = maxScroll;
             contentEl.scrollTo({ left: target, behavior: 'smooth' });
@@ -13584,6 +13725,7 @@ ${taskList}
             if (!step) return;
             const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
             let target = Math.round(contentEl.scrollLeft / step) * step;
+            target = Math.round(target); // 整数像素
             if (target < 0) target = 0;
             if (target > maxScroll) target = maxScroll;
             if (Math.abs(contentEl.scrollLeft - target) < 1) return;
@@ -13637,11 +13779,13 @@ ${taskList}
                     const position = step * (currentReadingPage - 1);
                     contentEl.scrollLeft = position;
                     currentReadingPosition = position;
-                } else {
+                } else if (step > 0) {
                     const scrollWidth = contentEl.scrollWidth - contentEl.clientWidth;
-                    const position = scrollWidth > 0 ? (scrollWidth * (pct / 100)) : 0;
-                    contentEl.scrollLeft = position;
-                    currentReadingPosition = position;
+                    const rawPosition = scrollWidth > 0 ? (scrollWidth * (pct / 100)) : 0;
+                    // 对齐到页面边界
+                    const position = Math.round(rawPosition / step) * step;
+                    contentEl.scrollLeft = Math.min(position, scrollWidth);
+                    currentReadingPosition = contentEl.scrollLeft;
                 }
             } else {
                 const scrollHeight = contentEl.scrollHeight - contentEl.clientHeight;
@@ -13945,8 +14089,8 @@ ${taskList}
             let endNode = range.endContainer;
             if (endNode.nodeType === 3) endNode = endNode.parentElement;
 
-            const startParagraph = startNode?.closest('p[data-paragraph]');
-            const endParagraph = endNode?.closest('p[data-paragraph]');
+            const startParagraph = startNode?.closest('[data-paragraph]');
+            const endParagraph = endNode?.closest('[data-paragraph]');
             if (!startParagraph || !endParagraph) return null;
 
             // 同一段落：返回单条结果
@@ -13973,7 +14117,7 @@ ${taskList}
             const segments = [];
 
             for (let i = startIdx; i <= endIdx; i++) {
-                const p = document.querySelector(`#reader-content p[data-paragraph="${i}"]`);
+                const p = document.querySelector(`#reader-content [data-paragraph="${i}"]`);
                 if (!p) continue;
                 const pText = p.textContent || '';
                 if (!pText.trim()) continue;
@@ -14491,20 +14635,26 @@ ${taskList}
 
         function scrollToParagraph(paragraphIndex) {
             const contentEl = document.getElementById('reader-content');
-            const paragraph = document.querySelector(`#reader-content p[data-paragraph="${paragraphIndex}"]`);
+            const paragraph = document.querySelector(`#reader-content [data-paragraph="${paragraphIndex}"]`);
             if (paragraph && contentEl) {
                 if (readerMode === 'page') {
-                    const page = paragraph.closest('.reader-page');
-                    if (page) {
-                        contentEl.scrollLeft = page.offsetLeft;
-                        currentReadingPosition = contentEl.scrollLeft;
-                    } else {
-                        const offset = paragraph.offsetLeft;
-                        contentEl.scrollLeft = offset;
-                        currentReadingPosition = contentEl.scrollLeft;
+                    const step = getReaderPageStep(contentEl);
+                    if (step > 0) {
+                        // 用 getBoundingClientRect 计算段落在滚动区域中的真实位置
+                        // 避免 offsetLeft 受 offsetParent 不同导致的偏差
+                        const containerRect = contentEl.getBoundingClientRect();
+                        const paragraphRect = paragraph.getBoundingClientRect();
+                        const absLeft = paragraphRect.left - containerRect.left + contentEl.scrollLeft;
+                        // 对齐到最近的页面边界（step 的整数倍）
+                        const pageIndex = Math.max(0, Math.floor(absLeft / step));
+                        let target = pageIndex * step;
+                        const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
+                        target = Math.min(target, maxScroll);
+                        contentEl.scrollLeft = target;
+                        currentReadingPosition = target;
                     }
-                    snapReaderToPage();
                     updatePageIndicator();
+                    saveReadingProgress();
                 } else {
                     paragraph.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     currentReadingPosition = contentEl.scrollTop;
@@ -15404,7 +15554,7 @@ ${taskList}
             const contentEl = document.getElementById('reader-content');
             if (!contentEl) return 0;
 
-            const paragraphs = contentEl.querySelectorAll('p[data-paragraph]');
+            const paragraphs = contentEl.querySelectorAll('[data-paragraph]');
             if (paragraphs.length === 0) return 0;
 
             if (readerMode === 'page') {
