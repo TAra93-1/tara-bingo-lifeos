@@ -502,6 +502,8 @@
         let viewDate = new Date();
         let currentPid = null;
         let timerInt = null;
+        let timerWakeLock = null;
+        let timerWakeLockListenerBound = false;
         let tempTask = null;
         let charts = { line: null, pie: null };
         let isEditMode = false;
@@ -580,6 +582,46 @@
 
         let currentEditingCharacter = null;
         let currentChatCharacter = null;
+        const avatarPlaceholderCache = new Map();
+
+        function escapeSvgText(text) {
+            return String(text || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getAvatarPlaceholder(size = 70, label = '') {
+            const safeSize = Math.max(32, Math.min(256, Number(size) || 70));
+            const safeLabel = String(label || '').trim().slice(0, 8);
+            const cacheKey = `${safeSize}|${safeLabel}`;
+            if (avatarPlaceholderCache.has(cacheKey)) {
+                return avatarPlaceholderCache.get(cacheKey);
+            }
+
+            const headY = Math.floor(safeSize * 0.4);
+            const headR = Math.floor(safeSize * 0.18);
+            const bodyX = Math.floor(safeSize * 0.27);
+            const bodyY = Math.floor(safeSize * 0.62);
+            const bodyW = Math.floor(safeSize * 0.46);
+            const bodyH = Math.floor(safeSize * 0.24);
+            const fontSize = Math.max(10, Math.floor(safeSize * 0.13));
+            const textY = Math.floor(safeSize * 0.86);
+            const textElement = safeLabel
+                ? `<text x="${safeSize / 2}" y="${textY}" text-anchor="middle" fill="#6f77a3" font-size="${fontSize}" font-family="sans-serif">${escapeSvgText(safeLabel)}</text>`
+                : '';
+
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${safeSize}" height="${safeSize}" viewBox="0 0 ${safeSize} ${safeSize}"><desc>lifeos-avatar-placeholder</desc><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#eff1ff"/><stop offset="100%" stop-color="#d8deff"/></linearGradient></defs><rect width="${safeSize}" height="${safeSize}" rx="${Math.floor(safeSize / 2)}" fill="url(#g)"/><circle cx="${Math.floor(safeSize / 2)}" cy="${headY}" r="${headR}" fill="#949ec5"/><rect x="${bodyX}" y="${bodyY}" width="${bodyW}" height="${bodyH}" rx="${Math.floor(bodyH / 2)}" fill="#949ec5"/>${textElement}</svg>`;
+            const dataUri = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+            avatarPlaceholderCache.set(cacheKey, dataUri);
+            return dataUri;
+        }
+
+        function isDefaultAvatarPlaceholder(src) {
+            return typeof src === 'string' && src.includes('lifeos-avatar-placeholder');
+        }
 
         // 打开角色导入弹窗
         function openCharacterImportModal() {
@@ -593,7 +635,7 @@
             document.getElementById('create-char-name').value = '';
             document.getElementById('create-char-description').value = '';
             document.getElementById('create-char-first-mes').value = '';
-            document.getElementById('create-char-avatar-preview').src = 'https://via.placeholder.com/100?text=点击上传';
+            document.getElementById('create-char-avatar-preview').src = getAvatarPlaceholder(100, '点击上传');
 
             // 清除编辑标记
             currentEditingCharacter = null;
@@ -630,7 +672,7 @@
                 currentEditingCharacter.name = name;
                 currentEditingCharacter.description = description;
                 currentEditingCharacter.first_mes = firstMes;
-                if(avatarSrc && !avatarSrc.includes('placeholder')) {
+                if(avatarSrc && !isDefaultAvatarPlaceholder(avatarSrc)) {
                     currentEditingCharacter.avatar = avatarSrc;
                 }
 
@@ -646,7 +688,7 @@
                     scenario: '',
                     first_mes: firstMes,
                     mes_example: '',
-                    avatar: avatarSrc.includes('placeholder') ? '' : avatarSrc,
+                    avatar: isDefaultAvatarPlaceholder(avatarSrc) ? '' : avatarSrc,
                     createdAt: Date.now(),
                     settings: {
                         maxMemory: 20,
@@ -704,7 +746,7 @@
             document.getElementById('create-char-name').value = currentEditingCharacter.name;
             document.getElementById('create-char-description').value = currentEditingCharacter.description || '';
             document.getElementById('create-char-first-mes').value = currentEditingCharacter.first_mes || '';
-            document.getElementById('create-char-avatar-preview').src = currentEditingCharacter.avatar || 'https://via.placeholder.com/100';
+            document.getElementById('create-char-avatar-preview').src = currentEditingCharacter.avatar || getAvatarPlaceholder(100);
 
             closeModal('modal-character-detail');
             document.getElementById('modal-create-character').classList.add('active');
@@ -1028,7 +1070,7 @@
                 charDiv.className = 'qq-chat-item';
                 charDiv.onclick = () => quickStartChat(char.id);
                 charDiv.innerHTML = `
-                    <img src="${char.avatar || 'https://via.placeholder.com/50'}" class="qq-chat-avatar">
+                    <img src="${char.avatar || getAvatarPlaceholder(50)}" class="qq-chat-avatar">
                     <div class="qq-chat-info">
                         <div class="qq-chat-name">${escapeHtml(char.settings?.nickname || char.name)}</div>
                         <div class="qq-chat-desc">${escapeHtml(lastMessage.substring(0, 30))}...</div>
@@ -1180,7 +1222,7 @@ ${gridText}`;
             // 打开聊天界面
             if (currentChatCharacter) {
                 // 设置聊天界面
-                document.getElementById('chat-avatar').src = currentChatCharacter.avatar || 'https://via.placeholder.com/40';
+                document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
                 document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
 
                 // 展开历史（确保能找到消息）
@@ -1390,8 +1432,8 @@ ${gridText}`;
             // --- Populate the new form ---
             
             // Identity
-            document.getElementById('character-detail-avatar').src = character.avatar || 'https://via.placeholder.com/70';
-            document.getElementById('user-avatar-preview').src = store.userAvatar || 'https://via.placeholder.com/70';
+            document.getElementById('character-detail-avatar').src = character.avatar || getAvatarPlaceholder(70);
+            document.getElementById('user-avatar-preview').src = store.userAvatar || getAvatarPlaceholder(70);
             document.getElementById('character-detail-nickname').value = character.settings.nickname || '';
             document.getElementById('character-detail-name-input').value = character.name || '';
 
@@ -1903,7 +1945,7 @@ ${gridText}`;
             updateReadingSpoilerToggle();
 
             // 设置聊天界面
-            document.getElementById('chat-avatar').src = currentChatCharacter.avatar || 'https://via.placeholder.com/40';
+            document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
             document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
 
             // 渲染聊天历史
@@ -2094,8 +2136,8 @@ ${gridText}`;
 
             // 头像 URL
             const avatarUrl = isUser
-                ? (store.userAvatar || 'https://via.placeholder.com/40')
-                : (currentChatCharacter.avatar || 'https://via.placeholder.com/40');
+                ? (store.userAvatar || getAvatarPlaceholder(40))
+                : (currentChatCharacter.avatar || getAvatarPlaceholder(40));
 
             const alignStyle = isUser ? 'flex-end' : 'flex-start';
             const bgColor = isUser ? 'var(--accent)' : 'var(--card-bg)';
@@ -3607,6 +3649,13 @@ ${gridText}`;
                 return html;
             }
 
+            const getKatexOptions = (displayMode) => ({
+                displayMode,
+                throwOnError: false,
+                strict: false,
+                trust: true
+            });
+
             // 用于保护已处理的公式，避免重复处理
             const placeholder = '@@LATEX_PLACEHOLDER_';
             const placeholders = [];
@@ -3614,11 +3663,7 @@ ${gridText}`;
             // 渲染块级公式 $$...$$ (先处理块级，避免被行内匹配)
             html = html.replace(/\$\$([\s\S]*?)\$\$/g, (match, latex) => {
                 try {
-                    const rendered = katex.renderToString(latex.trim(), {
-                        displayMode: true,
-                        throwOnError: false,
-                        trust: true
-                    });
+                    const rendered = katex.renderToString(latex.trim(), getKatexOptions(true));
                     placeholders.push(`<div class="katex-block">${rendered}</div>`);
                     return placeholder + (placeholders.length - 1) + '@@';
                 } catch (e) {
@@ -3630,11 +3675,7 @@ ${gridText}`;
             // 渲染块级公式 \[...\]
             html = html.replace(/\\\[([\s\S]*?)\\\]/g, (match, latex) => {
                 try {
-                    const rendered = katex.renderToString(latex.trim(), {
-                        displayMode: true,
-                        throwOnError: false,
-                        trust: true
-                    });
+                    const rendered = katex.renderToString(latex.trim(), getKatexOptions(true));
                     placeholders.push(`<div class="katex-block">${rendered}</div>`);
                     return placeholder + (placeholders.length - 1) + '@@';
                 } catch (e) {
@@ -3646,11 +3687,7 @@ ${gridText}`;
             // 渲染行内公式 $...$ (不匹配 $$)
             html = html.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\$)/g, (match, latex) => {
                 try {
-                    const rendered = katex.renderToString(latex.trim(), {
-                        displayMode: false,
-                        throwOnError: false,
-                        trust: true
-                    });
+                    const rendered = katex.renderToString(latex.trim(), getKatexOptions(false));
                     placeholders.push(`<span class="katex-inline">${rendered}</span>`);
                     return placeholder + (placeholders.length - 1) + '@@';
                 } catch (e) {
@@ -3662,11 +3699,7 @@ ${gridText}`;
             // 渲染行内公式 \(...\)
             html = html.replace(/\\\(([\s\S]*?)\\\)/g, (match, latex) => {
                 try {
-                    const rendered = katex.renderToString(latex.trim(), {
-                        displayMode: false,
-                        throwOnError: false,
-                        trust: true
-                    });
+                    const rendered = katex.renderToString(latex.trim(), getKatexOptions(false));
                     placeholders.push(`<span class="katex-inline">${rendered}</span>`);
                     return placeholder + (placeholders.length - 1) + '@@';
                 } catch (e) {
@@ -6578,6 +6611,44 @@ ${bingoContext}
         }
         let isFullscreenTimer = false;
 
+        async function requestTimerWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            if (!isFullscreenTimer) return;
+
+            try {
+                timerWakeLock = await navigator.wakeLock.request('screen');
+                timerWakeLock.addEventListener('release', () => {
+                    // 锁被系统释放后，仍在计时则尝试重新获取
+                    if (isFullscreenTimer && !document.hidden) {
+                        requestTimerWakeLock();
+                    }
+                });
+            } catch (e) {
+                console.warn('[番茄钟] 获取屏幕唤醒锁失败:', e);
+            }
+        }
+
+        async function releaseTimerWakeLock() {
+            if (!timerWakeLock) return;
+            try {
+                await timerWakeLock.release();
+            } catch (e) {
+                console.warn('[番茄钟] 释放屏幕唤醒锁失败:', e);
+            } finally {
+                timerWakeLock = null;
+            }
+        }
+
+        function bindTimerWakeLockListener() {
+            if (timerWakeLockListenerBound) return;
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && isFullscreenTimer) {
+                    requestTimerWakeLock();
+                }
+            });
+            timerWakeLockListenerBound = true;
+        }
+
         function startTimer(m) {
             if(m===0) { completeTask(); return; }
 
@@ -6588,6 +6659,8 @@ ${bingoContext}
 
         function enterFullscreenTimer(m) {
             isFullscreenTimer = true;
+            bindTimerWakeLockListener();
+            requestTimerWakeLock();
 
             // 显示全屏容器
             const fullscreenEl = document.getElementById('fullscreen-timer');
@@ -6615,7 +6688,7 @@ ${bingoContext}
             motivationEl.innerText = motivations[Math.floor(Math.random() * motivations.length)];
 
             const totalSeconds = m * 60;
-            let s = totalSeconds;
+            const timerEndAt = Date.now() + (totalSeconds * 1000);
             const circumference = 2 * Math.PI * 120; // 全屏圆环半径120
             const progressRing = document.getElementById('fullscreen-progress-ring');
             const timerText = document.getElementById('fullscreen-timer-text');
@@ -6633,8 +6706,13 @@ ${bingoContext}
                 systemTimeEl.innerText = `${hours}:${minutes}:${seconds}`;
             }
 
+            function getRemainingSeconds() {
+                return Math.max(0, Math.ceil((timerEndAt - Date.now()) / 1000));
+            }
+
             // 更新显示函数
             function updateTimer() {
+                const s = getRemainingSeconds();
                 const minutes = Math.floor(s / 60);
                 const seconds = s % 60;
                 const timeStr = `${minutes}:${String(seconds).padStart(2, '0')}`;
@@ -6646,16 +6724,18 @@ ${bingoContext}
                 document.title = `⏱️ ${timeStr} - Tarabingo`;
 
                 // 更新SVG圆环 (逆时针减少)
-                const progress = s / totalSeconds;
+                const progress = totalSeconds > 0 ? (s / totalSeconds) : 0;
                 const offset = circumference * (1 - progress);
                 progressRing.style.strokeDashoffset = offset;
 
                 // 更新百分比
-                const percentage = Math.round((s / totalSeconds) * 100);
+                const percentage = Math.round(progress * 100);
                 percentageEl.innerText = `${percentage}%`;
 
                 // 更新系统时间
                 updateSystemTime();
+
+                return s;
             }
 
             // 初始化显示
@@ -6663,16 +6743,15 @@ ${bingoContext}
 
             // 开始倒计时
             timerInt = setInterval(() => {
-                s--;
-                updateTimer();
+                const remaining = updateTimer();
 
-                if(s <= 0) {
+                if(remaining <= 0) {
                     clearInterval(timerInt);
                     document.title = 'Tarabingo';
                     exitFullscreenTimer();
                     completeTask();
                 }
-            }, 1000);
+            }, 250);
         }
 
         function exitFullscreenTimer() {
@@ -6683,6 +6762,8 @@ ${bingoContext}
                 clearInterval(timerInt);
                 document.title = 'Tarabingo';
             }
+
+            releaseTimerWakeLock();
         }
 
         function showCustomTimer() {
@@ -6735,12 +6816,26 @@ ${bingoContext}
                 currentNoteDetailId = null;
             }
 
+            if (id === 'modal-book-memory-editor') {
+                const idInput = document.getElementById('book-memory-entry-id');
+                const titleInput = document.getElementById('book-memory-entry-title');
+                const contentInput = document.getElementById('book-memory-entry-content');
+                if (idInput) idInput.value = '';
+                if (titleInput) titleInput.value = '';
+                if (contentInput) contentInput.value = '';
+            }
+
             // 重置番茄钟
             if(id === 'modal-timer') {
                 if(timerInt) clearInterval(timerInt);
                 document.title = 'Tarabingo'; // 恢复标题
                 document.getElementById('timer-display').style.display = 'none';
                 document.getElementById('custom-timer-input').style.display = 'none';
+                if (isFullscreenTimer) {
+                    exitFullscreenTimer();
+                } else {
+                    releaseTimerWakeLock();
+                }
             }
 
             // 重置 AI 报告模态框状态
@@ -7462,7 +7557,9 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                     const { content, ...meta } = b;
                     return meta;
                 }),
+                libraryCategories: await db.libraryCategories.toArray(),
                 readingProgress: await db.readingProgress.toArray(),
+                bookmarks: await db.bookmarks.toArray(),
                 readingNotes: await db.readingNotes.toArray(),
                 readingRooms: await db.readingRooms.toArray(),
                 memoryTables: await db.memoryTables.toArray()
@@ -7486,6 +7583,121 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
             markExportTime();
         }
         function triggerImport(m) { importMode=m; document.getElementById('file-import').click(); }
+
+        function mergeArraySmart(baseArr, incomingArr) {
+            const base = Array.isArray(baseArr) ? baseArr : [];
+            const incoming = Array.isArray(incomingArr) ? incomingArr : [];
+            const merged = [];
+            const seen = new Set();
+
+            const makeKey = (item) => {
+                if (item && typeof item === 'object') {
+                    if (item.id !== undefined && item.id !== null) return `id:${item.id}`;
+                    if (item.pid !== undefined && item.date !== undefined && item.text !== undefined) {
+                        return `log:${item.pid}|${item.date}|${item.text}`;
+                    }
+                }
+                try {
+                    return `json:${JSON.stringify(item)}`;
+                } catch (_) {
+                    return `str:${String(item)}`;
+                }
+            };
+
+            const pushIfNew = (item) => {
+                const key = makeKey(item);
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    merged.push(item);
+                }
+            };
+
+            base.forEach(pushIfNew);
+            incoming.forEach(pushIfNew);
+            return merged;
+        }
+
+        function mergeNumericMap(baseMap, incomingMap) {
+            const base = (baseMap && typeof baseMap === 'object') ? baseMap : {};
+            const incoming = (incomingMap && typeof incomingMap === 'object') ? incomingMap : {};
+            const result = { ...base };
+            for (const [key, value] of Object.entries(incoming)) {
+                const incomingNum = Number(value) || 0;
+                const baseNum = Number(result[key]) || 0;
+                result[key] = baseNum + incomingNum;
+            }
+            return result;
+        }
+
+        function mergeStoreIncremental(currentStore, incomingStore) {
+            const current = (currentStore && typeof currentStore === 'object') ? currentStore : {};
+            const incoming = (incomingStore && typeof incomingStore === 'object') ? incomingStore : {};
+            const merged = { ...current, ...incoming };
+
+            merged.balance = (Number(current.balance) || 0) + (Number(incoming.balance) || 0);
+            merged.projects = mergeArraySmart(current.projects, incoming.projects);
+            merged.logs = mergeArraySmart(current.logs, incoming.logs);
+            merged.redemptions = mergeArraySmart(current.redemptions, incoming.redemptions);
+            merged.weeklyBills = mergeArraySmart(current.weeklyBills, incoming.weeklyBills);
+            merged.reportArchive = mergeArraySmart(current.reportArchive, incoming.reportArchive);
+            merged.aiChatHistory = mergeArraySmart(current.aiChatHistory, incoming.aiChatHistory);
+            merged.aiConversations = mergeArraySmart(current.aiConversations, incoming.aiConversations);
+            merged.characterGroups = mergeArraySmart(current.characterGroups, incoming.characterGroups);
+            merged.gachaPool = mergeArraySmart(current.gachaPool, incoming.gachaPool);
+            merged.shopItems = mergeArraySmart(current.shopItems, incoming.shopItems);
+            merged.dailyStats = mergeNumericMap(current.dailyStats, incoming.dailyStats);
+
+            merged.apiConfig = {
+                ...(current.apiConfig || {}),
+                ...(incoming.apiConfig || {}),
+                main: { ...(current.apiConfig?.main || {}), ...(incoming.apiConfig?.main || {}) },
+                sub: { ...(current.apiConfig?.sub || {}), ...(incoming.apiConfig?.sub || {}) },
+                search: { ...(current.apiConfig?.search || {}), ...(incoming.apiConfig?.search || {}) }
+            };
+
+            merged.readingContextConfig = {
+                ...(current.readingContextConfig || {}),
+                ...(incoming.readingContextConfig || {})
+            };
+
+            merged.bubblePresets = {
+                ...(current.bubblePresets || {}),
+                ...(incoming.bubblePresets || {})
+            };
+
+            merged.bgActivitySettings = {
+                ...(current.bgActivitySettings || {}),
+                ...(incoming.bgActivitySettings || {})
+            };
+
+            merged.cloudBackup = {
+                ...(current.cloudBackup || {}),
+                ...(incoming.cloudBackup || {})
+            };
+
+            if (incoming.userAvatar !== undefined) merged.userAvatar = incoming.userAvatar;
+            if (incoming.userPersona !== undefined) merged.userPersona = incoming.userPersona;
+
+            if (!merged.lastDailyCheck || (incoming.lastDailyCheck && incoming.lastDailyCheck > merged.lastDailyCheck)) {
+                merged.lastDailyCheck = incoming.lastDailyCheck || merged.lastDailyCheck || '';
+            }
+            if (!merged.lastWeeklyReset || (incoming.lastWeeklyReset && incoming.lastWeeklyReset > merged.lastWeeklyReset)) {
+                merged.lastWeeklyReset = incoming.lastWeeklyReset || merged.lastWeeklyReset || '';
+            }
+
+            if (!Array.isArray(merged.characterGroups) || merged.characterGroups.length === 0) {
+                merged.characterGroups = ['默认分组', '特别关心'];
+            }
+            if (!Array.isArray(merged.projects)) merged.projects = [];
+            if (!Array.isArray(merged.logs)) merged.logs = [];
+            if (!Array.isArray(merged.redemptions)) merged.redemptions = [];
+            if (!Array.isArray(merged.weeklyBills)) merged.weeklyBills = [];
+            if (!Array.isArray(merged.aiChatHistory)) merged.aiChatHistory = [];
+            if (!Array.isArray(merged.reportArchive)) merged.reportArchive = [];
+
+            return merged;
+        }
+
         async function handleFile(input) {
             const reader = new FileReader();
             reader.onload = async (e) => {
@@ -7538,20 +7750,20 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                         if (importMode === 'overwrite') {
                             store = d.store;
                             // 清空并导入 IndexedDB 数据 - AI 助手
-                            if (d.characters && d.characters.length > 0) {
+                            if (Array.isArray(d.characters)) {
                                 await db.characters.clear();
-                                await db.characters.bulkPut(d.characters);
+                                if (d.characters.length > 0) await db.characters.bulkPut(d.characters);
                             }
-                            if (d.worldBooks && d.worldBooks.length > 0) {
+                            if (Array.isArray(d.worldBooks)) {
                                 await db.worldBooks.clear();
-                                await db.worldBooks.bulkPut(d.worldBooks);
+                                if (d.worldBooks.length > 0) await db.worldBooks.bulkPut(d.worldBooks);
                             }
-                            if (d.worldBookCategories && d.worldBookCategories.length > 0) {
+                            if (Array.isArray(d.worldBookCategories)) {
                                 await db.worldBookCategories.clear();
-                                await db.worldBookCategories.bulkPut(d.worldBookCategories);
+                                if (d.worldBookCategories.length > 0) await db.worldBookCategories.bulkPut(d.worldBookCategories);
                             }
                             // 清空并导入 IndexedDB 数据 - 图书馆
-                            if (d.libraryBooks && d.libraryBooks.length > 0) {
+                            if (Array.isArray(d.libraryBooks)) {
                                 // 覆盖模式：先合并正文（备份可能不含正文）
                                 const existingBooks = await db.libraryBooks.toArray();
                                 const contentMap = {};
@@ -7561,28 +7773,35 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                                     if (!b.content && contentMap[b.id]) b.content = contentMap[b.id];
                                     return b;
                                 });
-                                await db.libraryBooks.bulkPut(booksToImport);
+                                if (booksToImport.length > 0) await db.libraryBooks.bulkPut(booksToImport);
                             }
-                            if (d.readingProgress && d.readingProgress.length > 0) {
+                            if (Array.isArray(d.libraryCategories)) {
+                                await db.libraryCategories.clear();
+                                if (d.libraryCategories.length > 0) await db.libraryCategories.bulkPut(d.libraryCategories);
+                            }
+                            if (Array.isArray(d.readingProgress)) {
                                 await db.readingProgress.clear();
-                                await db.readingProgress.bulkPut(d.readingProgress);
+                                if (d.readingProgress.length > 0) await db.readingProgress.bulkPut(d.readingProgress);
                             }
-                            if (d.readingNotes && d.readingNotes.length > 0) {
+                            if (Array.isArray(d.bookmarks)) {
+                                await db.bookmarks.clear();
+                                if (d.bookmarks.length > 0) await db.bookmarks.bulkPut(d.bookmarks);
+                            }
+                            if (Array.isArray(d.readingNotes)) {
                                 await db.readingNotes.clear();
-                                await db.readingNotes.bulkPut(d.readingNotes);
+                                if (d.readingNotes.length > 0) await db.readingNotes.bulkPut(d.readingNotes);
                             }
-                            if (d.readingRooms && d.readingRooms.length > 0) {
+                            if (Array.isArray(d.readingRooms)) {
                                 await db.readingRooms.clear();
-                                await db.readingRooms.bulkPut(d.readingRooms);
+                                if (d.readingRooms.length > 0) await db.readingRooms.bulkPut(d.readingRooms);
                             }
-                            if (d.memoryTables && d.memoryTables.length > 0) {
+                            if (Array.isArray(d.memoryTables)) {
                                 await db.memoryTables.clear();
-                                await db.memoryTables.bulkPut(d.memoryTables);
+                                if (d.memoryTables.length > 0) await db.memoryTables.bulkPut(d.memoryTables);
                             }
                         } else {
                             // 增量模式
-                            store.projects = [...store.projects, ...(d.store.projects || [])];
-                            store.balance += d.store.balance || 0;
+                            store = mergeStoreIncremental(store, d.store);
                             // 增量导入角色（避免ID冲突，跳过已存在的）
                             if (d.characters) {
                                 for (const char of d.characters) {
@@ -7617,10 +7836,22 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                                     if (!existing) await db.libraryBooks.put(book);
                                 }
                             }
+                            if (d.libraryCategories) {
+                                for (const category of d.libraryCategories) {
+                                    const existing = await db.libraryCategories.get(category.id);
+                                    if (!existing) await db.libraryCategories.put(category);
+                                }
+                            }
                             if (d.readingProgress) {
                                 for (const prog of d.readingProgress) {
                                     const existing = await db.readingProgress.get(prog.id);
                                     if (!existing) await db.readingProgress.put(prog);
+                                }
+                            }
+                            if (d.bookmarks) {
+                                for (const bookmark of d.bookmarks) {
+                                    const existing = await db.bookmarks.get(bookmark.id);
+                                    if (!existing) await db.bookmarks.put(bookmark);
                                 }
                             }
                             if (d.readingNotes) {
@@ -7658,6 +7889,8 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                 } catch(err) {
                     console.error('导入错误:', err);
                     alert('导入失败: ' + err.message);
+                } finally {
+                    input.value = '';
                 }
             };
             reader.readAsText(input.files[0]);
@@ -9386,7 +9619,8 @@ ${contextText}`;
                     // Add timestamp
                     const entry = `[${new Date().toLocaleString()}] ${summary}`;
                     character.longTermMemory.push(entry);
-                    await db.characters.put(character);
+                    // 只更新长期记忆，避免在阅读室模式下覆盖角色原始聊天记录
+                    await db.characters.update(character.id, { longTermMemory: character.longTermMemory });
                     
                     if(statusEl) { statusEl.textContent = '✅ 记忆已归档'; setTimeout(() => { statusEl.style.display = 'none'; }, 3000); }
                 }
@@ -9550,6 +9784,11 @@ ${contextText}`;
                 }
             }
 
+            startBackgroundLoop();
+            if (enabled) {
+                checkBackgroundActivities().catch(e => console.error('[后台活动] 保存设置后立即检查失败:', e));
+            }
+
             alert('后台活动设置已保存!');
         }
 
@@ -9563,6 +9802,9 @@ ${contextText}`;
 
             if (enabled) {
                 toggleBgActivityCharacterList();
+            } else {
+                const container = document.getElementById('bg-activity-character-list-container');
+                if (container) container.style.display = 'none';
             }
         }
 
@@ -9667,10 +9909,12 @@ ${contextText}`;
                 const worldBooks = await db.worldBooks.toArray();
                 const worldBookCategories = await db.worldBookCategories.toArray();
 
-                let libraryBooks = [], readingProgress = [], readingNotes = [], readingRooms = [], memoryTables = [];
+                let libraryBooks = [], libraryCategories = [], readingProgress = [], bookmarks = [], readingNotes = [], readingRooms = [], memoryTables = [];
                 try {
                     libraryBooks = (await db.libraryBooks.toArray()).map(b => { const { content, ...meta } = b; return meta; });
+                    libraryCategories = await db.libraryCategories.toArray();
                     readingProgress = await db.readingProgress.toArray();
+                    bookmarks = await db.bookmarks.toArray();
                     readingNotes = await db.readingNotes.toArray();
                     readingRooms = await db.readingRooms.toArray();
                     memoryTables = await db.memoryTables.toArray();
@@ -9688,7 +9932,7 @@ ${contextText}`;
                         characterAvatars: characters.filter(c => c.avatar).map(c => ({ id: c.id, avatar: c.avatar }))
                     },
                     worldbooks: { worldBooks, worldBookCategories },
-                    library: { libraryBooks, readingProgress, readingNotes, readingRooms, memoryTables }
+                    library: { libraryBooks, libraryCategories, readingProgress, bookmarks, readingNotes, readingRooms, memoryTables }
                 };
 
                 // 3. 编码每个 part
@@ -9874,7 +10118,7 @@ ${contextText}`;
                         const lib = downloadedParts.library;
                         updateCloudProgress('正在恢复图书馆数据...', 85);
                         try {
-                            if (lib.libraryBooks && lib.libraryBooks.length > 0) {
+                            if (Array.isArray(lib.libraryBooks)) {
                                 // 保留本地已有的书籍正文
                                 const existingBooks = await db.libraryBooks.toArray();
                                 const contentMap = {};
@@ -9884,23 +10128,35 @@ ${contextText}`;
                                     if (!b.content && contentMap[b.id]) b.content = contentMap[b.id];
                                     return b;
                                 });
-                                await db.libraryBooks.bulkPut(booksToRestore);
+                                if (booksToRestore.length > 0) await db.libraryBooks.bulkPut(booksToRestore);
                             }
-                            if (lib.readingProgress && lib.readingProgress.length > 0) {
+                            if (Array.isArray(lib.libraryCategories)) {
+                                await db.libraryCategories.clear();
+                                if (lib.libraryCategories.length > 0) {
+                                    await db.libraryCategories.bulkPut(lib.libraryCategories);
+                                }
+                            }
+                            if (Array.isArray(lib.readingProgress)) {
                                 await db.readingProgress.clear();
-                                await db.readingProgress.bulkPut(lib.readingProgress);
+                                if (lib.readingProgress.length > 0) await db.readingProgress.bulkPut(lib.readingProgress);
                             }
-                            if (lib.readingNotes && lib.readingNotes.length > 0) {
+                            if (Array.isArray(lib.bookmarks)) {
+                                await db.bookmarks.clear();
+                                if (lib.bookmarks.length > 0) {
+                                    await db.bookmarks.bulkPut(lib.bookmarks);
+                                }
+                            }
+                            if (Array.isArray(lib.readingNotes)) {
                                 await db.readingNotes.clear();
-                                await db.readingNotes.bulkPut(lib.readingNotes);
+                                if (lib.readingNotes.length > 0) await db.readingNotes.bulkPut(lib.readingNotes);
                             }
-                            if (lib.readingRooms && lib.readingRooms.length > 0) {
+                            if (Array.isArray(lib.readingRooms)) {
                                 await db.readingRooms.clear();
-                                await db.readingRooms.bulkPut(lib.readingRooms);
+                                if (lib.readingRooms.length > 0) await db.readingRooms.bulkPut(lib.readingRooms);
                             }
-                            if (lib.memoryTables && lib.memoryTables.length > 0) {
+                            if (Array.isArray(lib.memoryTables)) {
                                 await db.memoryTables.clear();
-                                await db.memoryTables.bulkPut(lib.memoryTables);
+                                if (lib.memoryTables.length > 0) await db.memoryTables.bulkPut(lib.memoryTables);
                             }
                         } catch (e) {
                             console.warn('[云备份] 恢复图书馆数据失败:', e);
@@ -9962,6 +10218,41 @@ ${contextText}`;
                             await db.worldBookCategories.clear();
                             await db.worldBookCategories.bulkPut(backupData.worldBookCategories);
                         }
+                        if (Array.isArray(backupData.libraryBooks)) {
+                            const existingBooks = await db.libraryBooks.toArray();
+                            const contentMap = {};
+                            existingBooks.forEach(b => { if (b.content) contentMap[b.id] = b.content; });
+                            await db.libraryBooks.clear();
+                            const booksToRestore = backupData.libraryBooks.map(b => {
+                                if (!b.content && contentMap[b.id]) b.content = contentMap[b.id];
+                                return b;
+                            });
+                            if (booksToRestore.length > 0) await db.libraryBooks.bulkPut(booksToRestore);
+                        }
+                        if (Array.isArray(backupData.libraryCategories)) {
+                            await db.libraryCategories.clear();
+                            if (backupData.libraryCategories.length > 0) await db.libraryCategories.bulkPut(backupData.libraryCategories);
+                        }
+                        if (Array.isArray(backupData.readingProgress)) {
+                            await db.readingProgress.clear();
+                            if (backupData.readingProgress.length > 0) await db.readingProgress.bulkPut(backupData.readingProgress);
+                        }
+                        if (Array.isArray(backupData.bookmarks)) {
+                            await db.bookmarks.clear();
+                            if (backupData.bookmarks.length > 0) await db.bookmarks.bulkPut(backupData.bookmarks);
+                        }
+                        if (Array.isArray(backupData.readingNotes)) {
+                            await db.readingNotes.clear();
+                            if (backupData.readingNotes.length > 0) await db.readingNotes.bulkPut(backupData.readingNotes);
+                        }
+                        if (Array.isArray(backupData.readingRooms)) {
+                            await db.readingRooms.clear();
+                            if (backupData.readingRooms.length > 0) await db.readingRooms.bulkPut(backupData.readingRooms);
+                        }
+                        if (Array.isArray(backupData.memoryTables)) {
+                            await db.memoryTables.clear();
+                            if (backupData.memoryTables.length > 0) await db.memoryTables.bulkPut(backupData.memoryTables);
+                        }
                     } else {
                         store = backupData;
                     }
@@ -9989,47 +10280,91 @@ ${contextText}`;
             }
         }
 
+        let backgroundLoopTimer = null;
+        let isBackgroundChecking = false;
+        let backgroundLoopListenersBound = false;
+
+        function getBackgroundLoopIntervalMs() {
+            const minutes = Number(store.bgActivitySettings?.interval);
+            const normalizedMinutes = Number.isFinite(minutes) ? Math.max(1, Math.min(1440, minutes)) : 60;
+            return normalizedMinutes * 60 * 1000;
+        }
+
         function startBackgroundLoop() {
-            setInterval(checkBackgroundActivities, 60 * 1000); // Check every minute
+            if (backgroundLoopTimer) {
+                clearInterval(backgroundLoopTimer);
+            }
+
+            const intervalMs = getBackgroundLoopIntervalMs();
+            backgroundLoopTimer = setInterval(() => {
+                checkBackgroundActivities().catch(e => {
+                    console.error('[后台活动] 定时检查失败:', e);
+                });
+            }, intervalMs);
+
+            if (!backgroundLoopListenersBound) {
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) {
+                        checkBackgroundActivities().catch(e => {
+                            console.error('[后台活动] 可见性恢复检查失败:', e);
+                        });
+                    }
+                });
+                window.addEventListener('focus', () => {
+                    checkBackgroundActivities().catch(e => {
+                        console.error('[后台活动] 焦点恢复检查失败:', e);
+                    });
+                });
+                backgroundLoopListenersBound = true;
+            }
+
+            // 启动后短延迟做一次检查，避免必须等一个完整间隔
+            setTimeout(() => {
+                checkBackgroundActivities().catch(e => {
+                    console.error('[后台活动] 启动检查失败:', e);
+                });
+            }, 5000);
         }
 
         async function checkBackgroundActivities() {
+            if (isBackgroundChecking) return;
+            if (!store.bgActivitySettings?.enabled) return;
+
             // Requirement 3: 检查所有角色的后台活动
-            const characters = await db.characters.toArray();
-            const now = Date.now();
+            isBackgroundChecking = true;
+            try {
+                const characters = await db.characters.toArray();
+                const now = Date.now();
+                let triggeredCount = 0;
 
-            for (const char of characters) {
-                if (!char.settings.bgActivity) continue;
+                for (const char of characters) {
+                    if (!char?.settings?.bgActivity) continue;
 
-                // 冷却时间 (分钟 -> 毫秒)
-                const cooldownMs = (char.settings.bgCooldown || 120) * 60 * 1000;
-                
-                // 获取最后一条消息的时间
-                let lastMsgTime = 0;
-                if (char.chatHistory && char.chatHistory.length > 0) {
-                    lastMsgTime = char.chatHistory[char.chatHistory.length - 1].timestamp || 0;
-                } else {
-                    lastMsgTime = char.createdAt || 0;
+                    // 冷却时间 (分钟 -> 毫秒)
+                    const cooldownMs = (char.settings.bgCooldown || 120) * 60 * 1000;
+
+                    // 获取最后一条消息的时间
+                    let lastMsgTime = 0;
+                    if (char.chatHistory && char.chatHistory.length > 0) {
+                        lastMsgTime = char.chatHistory[char.chatHistory.length - 1].timestamp || 0;
+                    } else {
+                        lastMsgTime = char.createdAt || 0;
+                    }
+
+                    // 使用最近活动时间（聊天或后台触发）进行冷却判断
+                    const lastBgTriggerTime = Number(char.lastBgTriggerTime) || 0;
+                    const lastActivity = Math.max(lastMsgTime, lastBgTriggerTime);
+                    if (now - lastActivity < cooldownMs) continue;
+
+                    const triggered = await triggerBackgroundEvent(char);
+                    if (triggered) {
+                        triggeredCount++;
+                        // 单次检查最多触发2个角色，避免集中打扰
+                        if (triggeredCount >= 2) break;
+                    }
                 }
-
-                // 检查是否在冷却中
-                if (now - lastMsgTime < cooldownMs) continue;
-
-                // 简单的概率触发 (例如每分钟 5% 概率，避免刚过冷却就必定触发)
-                // 或者严格按照冷却触发? 用户说"冷却时间也没有被执行", 可能意味着它一直不触发.
-                // 我们这里设定: 只要过了冷却, 且最后一条消息不是角色自己发的(避免自言自语死循环), 就尝试触发.
-                // 或者是: 如果最后一条是用户的, 且过了冷却, AI 主动发起.
-                // 如果最后一条是 AI 的, 且过了冷却, AI 再次发起 (连续两句)? 通常避免这样.
-                // 让我们设定: 如果最后一条消息是用户的 (等待回复太久), 或者最后一条是 AI 的但已经过了很久 (主动发起新话题).
-                
-                // 为了防止无限循环自言自语, 我们可以检查最后一条是谁发的.
-                // 但"后台活动"通常指 AI 主动。
-                
-                // 增加一个标记: lastBgTriggerTime, 防止页面刷新后重复触发?
-                // 暂时简单处理: 如果满足冷却, 且 10% 概率触发 (每分钟检测一次, 期望值是过了冷却后10分钟内触发)
-                if (Math.random() > 0.1) continue;
-
-                await triggerBackgroundEvent(char);
+            } finally {
+                isBackgroundChecking = false;
             }
         }
 
@@ -10091,7 +10426,11 @@ Keep it short and natural. Don't mention you are an AI.`;
                         content: content,
                         timestamp: Date.now()
                     };
+                    if (!Array.isArray(char.chatHistory)) {
+                        char.chatHistory = [];
+                    }
                     char.chatHistory.push(newMsg);
+                    char.lastBgTriggerTime = newMsg.timestamp;
                     await db.characters.put(char);
                     
                     // 如果当前正在聊这个角色, 更新 UI
@@ -10104,11 +10443,13 @@ Keep it short and natural. Don't mention you are an AI.`;
                         showToast(`💬 ${char.name} 发来一条新消息`);
                         renderCharacterList(); // 更新列表预览
                     }
+                    return true;
                 }
 
             } catch (e) {
                 console.error("Background event failed", e);
             }
+            return false;
         }
 
         function showToast(msg) {
@@ -10148,8 +10489,8 @@ Keep it short and natural. Don't mention you are an AI.`;
             }
         });
 
-        window.addEventListener('DOMContentLoaded', () => {
-            init();
+        window.addEventListener('DOMContentLoaded', async () => {
+            await init();
             startBackgroundLoop();
         });
 
@@ -10271,7 +10612,7 @@ ${taskList}
             `;
 
             charSelectHtml += characters.map(char => {
-                const avatar = char.avatar || 'https://via.placeholder.com/40';
+                const avatar = char.avatar || getAvatarPlaceholder(40);
                 return `
                     <div class="mini-card" onclick="shareToCharacter('${char.id}')" style="display:flex; align-items:center; gap:12px; padding:12px; cursor:pointer; margin-bottom:8px;">
                         <img src="${avatar}" style="width:45px; height:45px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
@@ -10331,7 +10672,7 @@ ${taskList}
             // 打开聊天界面
             resetUI();
             document.body.classList.add('no-scroll');
-            document.getElementById('chat-avatar').src = currentChatCharacter.avatar || 'https://via.placeholder.com/40';
+            document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
             document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
             renderCharacterChatHistory();
             document.getElementById('character-chat-screen').style.display = 'flex';
@@ -10551,7 +10892,7 @@ ${taskList}
                             <div class="library-empty" style="text-align:center; padding:40px 20px;">
                                 <div style="margin-bottom:15px;"><svg class="icon" style="width:2.5rem;height:2.5rem;opacity:0.2;" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
                                 <p style="opacity:0.6; font-size:0.9rem;">暂无阅读室</p>
-                                <p style="font-size:0.75rem; opacity:0.4; margin-top:8px;">点击书籍阅读后可创建讨论室</p>
+                                <p style="font-size:0.75rem; opacity:0.4; margin-top:8px;">点击上方 + 创建，或在阅读器中创建讨论室</p>
                             </div>
                         `);
                     }
@@ -10876,6 +11217,7 @@ ${taskList}
                 'modal-reader-notes',
                 'modal-reader-progress',
                 'modal-book-memory',
+                'modal-book-memory-editor',
                 'modal-note-detail',
                 'modal-room-character-picker'
             ]);
@@ -12323,15 +12665,21 @@ ${taskList}
             }
         }
 
-        // 从阅读器创建阅读室
-        async function createReadingRoomFromReader() {
+        async function createReadingRoomForBook(book, options = {}) {
+            const {
+                closeFloatMenu = false,
+                openAfterCreate = true
+            } = options;
+
             try {
-                if (!currentBook) {
+                if (!book || !book.id) {
                     alert('请先打开一本书');
                     return;
                 }
 
-                toggleReaderFloatMenu();
+                if (closeFloatMenu) {
+                    toggleReaderFloatMenu();
+                }
 
                 // 1. 选择角色
                 const selectedCharId = await showCharacterPickerForRoom();
@@ -12341,12 +12689,30 @@ ${taskList}
                 const character = await db.characters.get(selectedCharId);
                 const charName = character ? character.name : '角色';
 
-                const roomName = prompt('请输入阅读室名称:', `${charName} · 《${currentBook.title}》`);
+                const roomName = prompt('请输入阅读室名称:', `${charName} · 《${book.title}》`);
                 if (!roomName) return;
+                const normalizedRoomName = roomName.trim();
+                if (!normalizedRoomName) {
+                    alert('阅读室名称不能为空');
+                    return;
+                }
+
+                // 重名保护：同一本书 + 同一个角色 + 同名时优先复用
+                const existedRooms = await db.readingRooms.where('bookId').equals(book.id).toArray();
+                const duplicated = (existedRooms || []).find(r =>
+                    (r.characterId === selectedCharId) &&
+                    ((r.name || '').trim() === normalizedRoomName)
+                );
+                if (duplicated) {
+                    if (confirm(`阅读室"${normalizedRoomName}"已存在，是否直接打开？`)) {
+                        await openReadingRoom(duplicated.id);
+                    }
+                    return duplicated.id;
+                }
 
                 const roomData = {
-                    bookId: currentBook.id,
-                    name: roomName,
+                    bookId: book.id,
+                    name: normalizedRoomName,
                     createdDate: Date.now(),
                     lastActiveDate: Date.now(),
                     characterId: selectedCharId,
@@ -12357,14 +12723,61 @@ ${taskList}
                 const roomId = await db.readingRooms.put(roomData);
 
                 if (typeof showToast === 'function') {
-                    showToast(`阅读室"${roomName}"创建成功`);
+                    showToast(`阅读室"${normalizedRoomName}"创建成功`);
                 }
 
-                // 自动打开刚创建的阅读室
-                await openReadingRoom(roomId);
+                await loadReadingRooms();
+                if (openAfterCreate) {
+                    await openReadingRoom(roomId);
+                }
+                return roomId;
 
             } catch (error) {
                 handleError(error, '创建阅读室失败', ErrorLevel.ERROR);
+            }
+        }
+
+        // 从阅读器创建阅读室
+        async function createReadingRoomFromReader() {
+            if (!currentBook) {
+                alert('请先打开一本书');
+                return;
+            }
+            await createReadingRoomForBook(currentBook, {
+                closeFloatMenu: true,
+                openAfterCreate: true
+            });
+        }
+
+        // 从图书馆创建阅读室（不要求先进入阅读器）
+        async function createReadingRoomFromLibrary() {
+            try {
+                const books = await dbHelper.safeToArray('libraryBooks', '书籍');
+                if (!books || books.length === 0) {
+                    alert('请先在书架中导入至少一本书');
+                    return;
+                }
+
+                let targetBook = null;
+                if (books.length === 1) {
+                    targetBook = books[0];
+                } else {
+                    const listText = books.map((b, i) => `${i + 1}. ${b.title || '未命名书籍'}`).join('\n');
+                    const defaultIndex = Math.max(1, books.findIndex(b => b.id === currentBook?.id) + 1);
+                    const choice = prompt(`选择要创建阅读室的书籍:\n\n${listText}\n\n请输入序号:`, String(defaultIndex || 1));
+                    if (!choice) return;
+                    const idx = parseInt(choice, 10) - 1;
+                    if (idx < 0 || idx >= books.length) {
+                        alert('无效序号');
+                        return;
+                    }
+                    targetBook = books[idx];
+                }
+
+                if (!targetBook) return;
+                await createReadingRoomForBook(targetBook, { openAfterCreate: true });
+            } catch (error) {
+                handleError(error, '从图书馆创建阅读室失败', ErrorLevel.ERROR);
             }
         }
 
@@ -13484,7 +13897,7 @@ ${taskList}
                         <div style="font-weight:bold;">${escapeHtml(entry.title || '未命名')}</div>
                         <div style="font-size:0.7rem; opacity:0.6;">${new Date(entry.updatedDate || entry.createdDate).toLocaleDateString()}</div>
                     </div>
-                    <div style="font-size:0.85rem; margin-top:6px; white-space:pre-wrap;">${escapeHtml(entry.content || '')}</div>
+                    <div class="markdown-content" style="font-size:0.85rem; margin-top:6px;">${renderMarkdown(entry.content || '')}</div>
                     <div style="display:flex; gap:8px; margin-top:8px;">
                         <button class="btn-sec" style="width:auto; padding:4px 8px; font-size:0.7rem;" onclick="editBookMemoryEntry(${entry.id})">编辑</button>
                         <button class="btn-sec" style="width:auto; padding:4px 8px; font-size:0.7rem; color:#c62828;" onclick="deleteBookMemoryEntry(${entry.id})">删除</button>
@@ -13493,51 +13906,137 @@ ${taskList}
             `).join('');
         }
 
+        function openBookMemoryEntryEditor(entry = null) {
+            const titleEl = document.getElementById('book-memory-editor-title');
+            const idInput = document.getElementById('book-memory-entry-id');
+            const titleInput = document.getElementById('book-memory-entry-title');
+            const contentInput = document.getElementById('book-memory-entry-content');
+            const typeSelect = document.getElementById('book-memory-type');
+            if (!titleEl || !idInput || !titleInput || !contentInput) return;
+
+            if (entry) {
+                idInput.value = entry.id ?? '';
+                titleInput.value = entry.title || '';
+                contentInput.value = entry.content || '';
+                titleEl.textContent = '编辑记忆条目';
+                if (entry.type && typeSelect) {
+                    typeSelect.value = entry.type;
+                    currentBookMemoryType = entry.type;
+                }
+            } else {
+                idInput.value = '';
+                titleInput.value = '';
+                contentInput.value = '';
+                titleEl.textContent = '新增记忆条目';
+            }
+
+            openModal('modal-book-memory-editor');
+            setTimeout(() => titleInput.focus(), 30);
+        }
+
         async function addBookMemoryEntry() {
             if (!currentBook) {
                 alert('请先打开一本书');
                 return;
             }
-            const typeSelect = document.getElementById('book-memory-type');
-            const type = typeSelect ? typeSelect.value : currentBookMemoryType;
-
-            const title = prompt('请输入条目名称:', '');
-            if (!title) return;
-            const content = prompt('请输入条目内容:', '');
-            if (!content) return;
-
-            await dbHelper.safePut('memoryTables', {
-                bookId: currentBook.id,
-                type: type,
-                title: title.trim(),
-                content: content.trim(),
-                createdDate: Date.now()
-            }, '记忆库');
-
-            if (typeof showToast === 'function') showToast('✅ 记忆条目已添加');
-            loadBookMemoryEntries();
+            openBookMemoryEntryEditor();
         }
 
         async function editBookMemoryEntry(entryId) {
-            const entry = await dbHelper.safeGet('memoryTables', entryId, '记忆库');
-            if (!entry) return;
-            const newTitle = prompt('编辑条目名称:', entry.title || '');
-            if (!newTitle) return;
-            const newContent = prompt('编辑条目内容:', entry.content || '');
-            if (!newContent) return;
+            try {
+                const id = Number(entryId);
+                const key = Number.isNaN(id) ? entryId : id;
+                const entry = await dbHelper.safeGet('memoryTables', key, '记忆库');
+                if (!entry) {
+                    alert('条目不存在，可能已被删除');
+                    return;
+                }
+                openBookMemoryEntryEditor(entry);
+            } catch (error) {
+                handleError(error, '编辑记忆条目失败', ErrorLevel.ERROR);
+            }
+        }
 
-            await db.memoryTables.update(entryId, {
-                title: newTitle.trim(),
-                content: newContent.trim(),
-                updatedDate: Date.now()
-            });
-            loadBookMemoryEntries();
+        async function saveBookMemoryEntryFromModal() {
+            try {
+                if (!currentBook) {
+                    alert('请先打开一本书');
+                    return;
+                }
+
+                const idInput = document.getElementById('book-memory-entry-id');
+                const titleInput = document.getElementById('book-memory-entry-title');
+                const contentInput = document.getElementById('book-memory-entry-content');
+                const typeSelect = document.getElementById('book-memory-type');
+                if (!idInput || !titleInput || !contentInput) return;
+
+                const normalizedTitle = (titleInput.value || '').trim();
+                const normalizedContent = (contentInput.value || '').trim();
+                if (!normalizedTitle) {
+                    alert('条目名称不能为空');
+                    titleInput.focus();
+                    return;
+                }
+                if (!normalizedContent) {
+                    alert('条目内容不能为空');
+                    contentInput.focus();
+                    return;
+                }
+
+                const type = typeSelect ? typeSelect.value : currentBookMemoryType;
+                const now = Date.now();
+                const idRaw = (idInput.value || '').trim();
+
+                if (idRaw) {
+                    const id = Number(idRaw);
+                    const key = Number.isNaN(id) ? idRaw : id;
+                    const existing = await dbHelper.safeGet('memoryTables', key, '记忆库');
+                    if (!existing) {
+                        alert('条目不存在，可能已被删除');
+                        closeModal('modal-book-memory-editor');
+                        await loadBookMemoryEntries();
+                        return;
+                    }
+                    await dbHelper.safePut('memoryTables', {
+                        ...existing,
+                        id: key,
+                        bookId: currentBook.id,
+                        type: type,
+                        title: normalizedTitle,
+                        content: normalizedContent,
+                        createdDate: existing.createdDate || now,
+                        updatedDate: now
+                    }, '记忆库');
+                    if (typeof showToast === 'function') showToast('✅ 记忆条目已更新');
+                } else {
+                    await dbHelper.safePut('memoryTables', {
+                        bookId: currentBook.id,
+                        type: type,
+                        title: normalizedTitle,
+                        content: normalizedContent,
+                        createdDate: now,
+                        updatedDate: now
+                    }, '记忆库');
+                    if (typeof showToast === 'function') showToast('✅ 记忆条目已添加');
+                }
+
+                closeModal('modal-book-memory-editor');
+                await loadBookMemoryEntries();
+            } catch (error) {
+                handleError(error, '保存记忆条目失败', ErrorLevel.ERROR);
+            }
         }
 
         async function deleteBookMemoryEntry(entryId) {
-            if (!confirm('确定要删除这条记忆吗？')) return;
-            await dbHelper.safeDelete('memoryTables', entryId, '记忆库');
-            loadBookMemoryEntries();
+            try {
+                if (!confirm('确定要删除这条记忆吗？')) return;
+                const id = Number(entryId);
+                await dbHelper.safeDelete('memoryTables', Number.isNaN(id) ? entryId : id, '记忆库');
+                if (typeof showToast === 'function') showToast('✅ 记忆条目已删除');
+                await loadBookMemoryEntries();
+            } catch (error) {
+                handleError(error, '删除记忆条目失败', ErrorLevel.ERROR);
+            }
         }
 
         async function summarizeBookRange() {
@@ -13560,10 +14059,19 @@ ${taskList}
                 return;
             }
 
+            if (!currentBook.content || typeof currentBook.content !== 'string') {
+                alert('当前书籍缺少正文内容，无法执行总结');
+                return;
+            }
+
             const total = currentBook.content.length;
             const startIdx = Math.floor(total * (startPct / 100));
             const endIdx = Math.floor(total * (endPct / 100));
             let snippet = currentBook.content.slice(startIdx, endIdx);
+            if (!snippet.trim()) {
+                alert('所选范围没有可总结的内容，请调整范围');
+                return;
+            }
             const maxLen = 6000;
             if (snippet.length > maxLen) {
                 snippet = snippet.slice(0, maxLen) + '\n...[内容过长已截断]';
@@ -13611,7 +14119,7 @@ ${taskList}
                     }, '记忆库');
 
                     if (typeof showToast === 'function') showToast('✅ 记忆库已更新');
-                    loadBookMemoryEntries();
+                    await loadBookMemoryEntries();
                 }
             } catch (error) {
                 handleError(error, 'AI总结失败', ErrorLevel.ERROR);
@@ -13712,7 +14220,7 @@ ${taskList}
 
                 // 设置聊天界面
                 document.body.classList.add('no-scroll');
-                document.getElementById('chat-avatar').src = character.avatar || 'https://via.placeholder.com/40';
+                document.getElementById('chat-avatar').src = character.avatar || getAvatarPlaceholder(40);
                 document.getElementById('chat-character-name').textContent = currentReadingRoom.openedFromReader
                     ? `${character.name} · ${room.name} 📖`
                     : `${character.name} · ${room.name}`;
@@ -13758,7 +14266,7 @@ ${taskList}
 
                     listEl.innerHTML = characters.map(char => `
                         <div class="mini-card" style="display:flex; align-items:center; gap:12px; padding:12px; cursor:pointer; margin-bottom:8px;" data-char-id="${char.id}">
-                            <img src="${char.avatar || 'https://via.placeholder.com/40'}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
+                            <img src="${char.avatar || getAvatarPlaceholder(40)}" style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
                             <div style="flex:1;">
                                 <div style="font-weight:bold; font-size:0.95rem;">${char.name}</div>
                                 <div style="font-size:0.75rem; opacity:0.6; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${char.description?.substring(0, 50) || '无描述'}</div>
