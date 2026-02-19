@@ -648,6 +648,15 @@
         <div class="context-menu-item" style="color:#c62828;" onclick="handleAiContextAction('delete')">🗑️ 永久删除</div>
     </div>
 
+    <!-- 长按菜单: 角色会话窗口 -->
+    <div id="character-session-menu" class="context-menu">
+        <div class="context-menu-item" onclick="handleCharacterSessionMenuAction('rename')">✏️ 重命名</div>
+        <div class="context-menu-item" onclick="handleCharacterSessionMenuAction('pin')"><span id="character-session-menu-pin">置顶</span></div>
+        <div class="context-menu-item" onclick="handleCharacterSessionMenuAction('copy')">📋 复制窗口</div>
+        <div class="context-menu-item" onclick="handleCharacterSessionMenuAction('mount')">🔗 挂载设置</div>
+        <div class="context-menu-item" style="color:#c62828;" onclick="handleCharacterSessionMenuAction('delete')">🗑️ 删除窗口</div>
+    </div>
+
     <!-- 长按菜单: 角色聊天 -->
     <div id="character-message-menu" class="context-menu">
         <div class="context-menu-item" onclick="handleCharacterMessageAction('copy')">📋 复制内容</div>
@@ -1950,6 +1959,9 @@
                     <div id="chat-message-counter" style="font-size:0.7rem; opacity:0.6; color:var(--accent);">(0条)</div>
                 </div>
             </div>
+    <span id="chat-session-btn" class="tool-icon" style="margin-right:15px;" onclick="openCharacterSessionSidebar()" title="会话窗口">
+        <svg class="icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+    </span>
     <span class="tool-icon" style="margin-right:15px;" onclick="openMemoryLibrary()" title="长期记忆库">
         <svg class="icon" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"></path><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"></path></svg>
     </span>
@@ -2038,6 +2050,19 @@
                 <textarea id="character-chat-input" placeholder="输入消息... (回车换行)" style="flex:1; padding:10px; border:1px solid rgba(0,0,0,0.1); border-radius:15px; resize:none; max-height:100px; font-family:inherit; background:var(--bg); color:var(--text); min-height:40px;"></textarea>
                 <button id="character-send-btn" style="width:40px; height:40px; border-radius:50%; background:var(--accent); color:var(--bg); border:none; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.2); flex-shrink:0; display:flex; align-items:center; justify-content:center;" onclick="sendCharacterMessage()"><svg class="icon" style="width:20px;height:20px;stroke:var(--bg);" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg></button>
             </div>
+        </div>
+    </div>
+    <!-- 角色会话侧边栏遮罩（移到 chat-screen 外部避免 last-child 选择器冲突） -->
+    <div id="character-session-overlay" onclick="closeCharacterSessionSidebar()"></div>
+    <!-- 角色会话侧边栏 -->
+    <div id="character-session-sidebar">
+        <div class="character-session-sidebar-header">
+            <span id="character-session-sidebar-title" style="font-size:1rem; color:var(--accent);">会话窗口</span>
+            <span style="cursor:pointer; font-size:1.2rem;" onclick="closeCharacterSessionSidebar()">×</span>
+        </div>
+        <div id="character-session-sidebar-list"></div>
+        <div class="character-session-sidebar-footer">
+            <button id="character-session-sidebar-create" class="btn" style="width:100%; margin:0;">+ 新建会话</button>
         </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>

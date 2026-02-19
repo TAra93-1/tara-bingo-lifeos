@@ -2168,8 +2168,8 @@ input:focus, textarea:focus, select:focus {
 #character-list {
     display: grid !important;
     grid-template-columns: 1fr;
-    gap: 12px;
-    padding: 10px;
+    gap: 6px;
+    padding: 8px;
 }
 
 #character-list > div,
@@ -2177,11 +2177,11 @@ input:focus, textarea:focus, select:focus {
     background: var(--card-bg);
     border: 1px solid rgba(var(--accent-rgb), 0.15);
     border-left: 4px solid var(--accent);
-    padding: 15px;
+    padding: 10px 12px;
     border-radius: 6px !important;
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 12px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.05);
     position: relative;
     overflow: hidden;
@@ -2683,4 +2683,142 @@ body.screen-shake-active {
 
 .cell.bingo-cell-celebrate {
     animation: cell-ripple 0.3s ease-in-out;
+}
+
+/* 分组容器：覆盖 #character-list > div 的卡片样式 */
+#character-list > div.char-group {
+    display: block;
+    padding: 0;
+    border-left: none;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    gap: 0;
+    overflow: visible;
+}
+#character-list > div.char-group::after {
+    display: none;
+}
+
+/* Character Sessions */
+.character-entry {
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--card-bg);
+    border: 1px solid rgba(var(--accent-rgb), 0.1);
+    margin-bottom: 6px;
+}
+
+.character-entry-head {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.character-session-sublist {
+    padding: 0 6px 6px 12px;
+    border-left: 2px dashed rgba(var(--accent-rgb), 0.18);
+    margin: 0 8px 6px;
+}
+
+.character-session-item,
+.character-session-sidebar-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.14);
+    background: rgba(0, 0, 0, 0.02);
+    margin-top: 5px;
+    cursor: pointer;
+}
+
+.character-session-item:active,
+.character-session-sidebar-item:active {
+    transform: scale(0.995);
+}
+
+.character-session-main {
+    min-width: 0;
+    flex: 1;
+}
+
+.character-session-name {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.character-session-desc {
+    font-size: 0.74rem;
+    opacity: 0.62;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.character-session-sidebar-item.active {
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.5);
+}
+
+#character-session-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 5200;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+#character-session-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#character-session-sidebar {
+    position: fixed;
+    top: 0;
+    right: -92%;
+    width: min(92%, 360px);
+    height: 100%;
+    background: var(--card-bg);
+    z-index: 5300;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    transition: right 0.24s ease;
+}
+
+#character-session-sidebar.active {
+    right: 0;
+}
+
+.character-session-sidebar-header {
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+#character-session-sidebar-title {
+    font-weight: 700;
+    color: var(--accent);
+}
+
+#character-session-sidebar-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 12px;
+}
+
+.character-session-sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
 }

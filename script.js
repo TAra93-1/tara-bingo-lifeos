@@ -1,4 +1,4 @@
-        // ==================== 全局错误处理机制 ====================
+﻿        // ==================== 全局错误处理机制 ====================
 
         // 错误日志存储
         const errorLog = [];
@@ -109,6 +109,21 @@
             bookmarks: '++id, bookId, position, note, createdDate',
             readingNotes: '++id, bookId, position, content, type, createdDate',
             memoryTables: '++id, bookId, type, data' // type: 'character' | 'item' | 'plot'
+        });
+
+        // 角色多窗口会话升级
+        db.version(3).stores({
+            worldBooks: '&id, name, categoryId',
+            worldBookCategories: '++id, name',
+            characters: '&id, name',
+            libraryBooks: '++id, title, categoryId, status, uploadDate, lastReadDate',
+            libraryCategories: '++id, name, order',
+            readingRooms: '++id, bookId, characterId, name, createdDate, lastActiveDate',
+            readingProgress: '++id, bookId, lastPosition, percentage',
+            bookmarks: '++id, bookId, position, note, createdDate',
+            readingNotes: '++id, bookId, position, content, type, createdDate',
+            memoryTables: '++id, bookId, type, data',
+            characterSessions: '&id, characterId, name, pinned, mountMode, mountSourceSessionId, createdAt, updatedAt, lastActiveAt'
         });
 
         // IndexedDB 操作包装函数（统一错误处理）
@@ -573,7 +588,15 @@
 
             // 4. 关闭上下文菜单
             document.querySelectorAll('.context-menu').forEach(el => el.classList.remove('active'));
-            
+
+            // 4.1 关闭角色会话侧栏
+            const sessionOverlay = document.getElementById('character-session-overlay');
+            const sessionSidebar = document.getElementById('character-session-sidebar');
+            if (sessionOverlay) sessionOverlay.classList.remove('active');
+            if (sessionSidebar) sessionSidebar.classList.remove('active');
+            const sessionMenu = document.getElementById('character-session-menu');
+            if (sessionMenu) sessionMenu.classList.remove('active');
+             
             // 5. 恢复页面滚动
             document.body.classList.remove('no-scroll');
         }
@@ -582,7 +605,13 @@
 
         let currentEditingCharacter = null;
         let currentChatCharacter = null;
+        let currentCharacterSession = null;
+        let chatOpenedFromCharacterManager = false;
+        const characterSessionExpandState = new Set();
+        let currentCharacterSessionMenuSessionId = null;
+        let characterSessionMenuBound = false;
         const avatarPlaceholderCache = new Map();
+        const DEFAULT_CHARACTER_SESSION_NAME = '主窗口';
 
         function escapeSvgText(text) {
             return String(text || '')
@@ -621,6 +650,258 @@
 
         function isDefaultAvatarPlaceholder(src) {
             return typeof src === 'string' && src.includes('lifeos-avatar-placeholder');
+        }
+
+        function generateCharacterSessionId() {
+            return `cs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        }
+
+        function isCharacterSessionModeEnabled(character) {
+            return character?.settings?.sessionMigrationDecision === 'accepted';
+        }
+
+        function normalizeCharacterSession(session) {
+            if (!session) return null;
+            return {
+                ...session,
+                id: session.id || generateCharacterSessionId(),
+                characterId: session.characterId || '',
+                name: (session.name || DEFAULT_CHARACTER_SESSION_NAME).trim(),
+                pinned: !!session.pinned,
+                chatHistory: Array.isArray(session.chatHistory) ? session.chatHistory : [],
+                longTermMemory: Array.isArray(session.longTermMemory) ? session.longTermMemory : [],
+                mountMode: ['blank', 'copy', 'reference'].includes(session.mountMode) ? session.mountMode : 'blank',
+                mountSourceSessionId: session.mountSourceSessionId || null,
+                mountMemoryCount: Number.isFinite(Number(session.mountMemoryCount))
+                    ? Math.max(1, Math.min(50, Number(session.mountMemoryCount)))
+                    : 3,
+                createdAt: Number(session.createdAt) || Date.now(),
+                updatedAt: Number(session.updatedAt) || Date.now(),
+                lastActiveAt: Number(session.lastActiveAt) || Number(session.updatedAt) || Date.now()
+            };
+        }
+
+        function sortCharacterSessions(sessions) {
+            return [...(sessions || [])].sort((a, b) => {
+                const pinnedDiff = Number(!!b.pinned) - Number(!!a.pinned);
+                if (pinnedDiff !== 0) return pinnedDiff;
+                const activeDiff = (Number(b.lastActiveAt) || 0) - (Number(a.lastActiveAt) || 0);
+                if (activeDiff !== 0) return activeDiff;
+                return (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0);
+            });
+        }
+
+        async function getCharacterSessions(characterId) {
+            const raw = await db.characterSessions.where('characterId').equals(characterId).toArray();
+            return sortCharacterSessions(raw.map(normalizeCharacterSession).filter(Boolean));
+        }
+
+        async function getCharacterSessionsMap() {
+            const all = await db.characterSessions.toArray();
+            const map = {};
+            all.map(normalizeCharacterSession).forEach(session => {
+                if (!session?.characterId) return;
+                if (!map[session.characterId]) map[session.characterId] = [];
+                map[session.characterId].push(session);
+            });
+            Object.keys(map).forEach(characterId => {
+                map[characterId] = sortCharacterSessions(map[characterId]);
+            });
+            return map;
+        }
+
+        async function createCharacterSession(characterId, options = {}) {
+            const now = Date.now();
+            const mode = ['blank', 'copy', 'reference'].includes(options.mountMode) ? options.mountMode : 'blank';
+            const hydrateCopyMemory = options.hydrateCopyMemory !== false;
+            let longTermMemory = Array.isArray(options.longTermMemory) ? [...options.longTermMemory] : [];
+            let mountSourceSessionId = options.mountSourceSessionId || null;
+            const mountMemoryCount = Number.isFinite(Number(options.mountMemoryCount))
+                ? Math.max(1, Math.min(50, Number(options.mountMemoryCount)))
+                : 3;
+
+            if (hydrateCopyMemory && mode === 'copy' && mountSourceSessionId) {
+                const source = await db.characterSessions.get(mountSourceSessionId);
+                if (source && source.characterId === characterId) {
+                    const sourceMemory = Array.isArray(source.longTermMemory) ? source.longTermMemory : [];
+                    longTermMemory = sourceMemory.slice(-mountMemoryCount);
+                } else {
+                    mountSourceSessionId = null;
+                }
+            }
+
+            const session = normalizeCharacterSession({
+                id: options.id || generateCharacterSessionId(),
+                characterId,
+                name: (options.name || DEFAULT_CHARACTER_SESSION_NAME).trim(),
+                pinned: !!options.pinned,
+                chatHistory: Array.isArray(options.chatHistory) ? [...options.chatHistory] : [],
+                longTermMemory,
+                mountMode: mode,
+                mountSourceSessionId: mode === 'blank' ? null : mountSourceSessionId,
+                mountMemoryCount,
+                createdAt: now,
+                updatedAt: now,
+                lastActiveAt: now
+            });
+
+            await db.characterSessions.put(session);
+            return session;
+        }
+
+        async function ensureCharacterPrimarySession(character, seedData = null) {
+            const sessions = await getCharacterSessions(character.id);
+            if (sessions.length > 0) return sessions[0];
+            const seeded = seedData || {};
+            return createCharacterSession(character.id, {
+                name: DEFAULT_CHARACTER_SESSION_NAME,
+                chatHistory: Array.isArray(seeded.chatHistory) ? seeded.chatHistory : [],
+                longTermMemory: Array.isArray(seeded.longTermMemory) ? seeded.longTermMemory : [],
+                mountMode: 'blank'
+            });
+        }
+
+        async function maybeMigrateLegacyCharacter(characterId, askUser = true, forcePrompt = false) {
+            let character = await db.characters.get(characterId);
+            if (!character) return null;
+            if (!character.settings) character.settings = {};
+
+            const decision = character.settings.sessionMigrationDecision;
+            const legacyChat = Array.isArray(character.chatHistory) ? character.chatHistory : [];
+            const legacyMemory = Array.isArray(character.longTermMemory) ? character.longTermMemory : [];
+            const hasLegacyData = legacyChat.length > 0 || legacyMemory.length > 0;
+
+            if (decision === 'rejected') {
+                if (!forcePrompt) return { character, mode: 'legacy', pending: false };
+                const retryMigrate = !askUser || confirm(
+                    `角色 "${character.name}" 当前处于旧模式。\n\n` +
+                    `是否现在迁移为多窗口会话？\n` +
+                    `确定：迁移到“${DEFAULT_CHARACTER_SESSION_NAME}”并启用窗口管理\n` +
+                    `取消：继续保持旧模式`
+                );
+                if (!retryMigrate) return { character, mode: 'legacy', pending: false };
+                character.settings.sessionMigrationDecision = '';
+                await db.characters.put(character);
+            }
+
+            if (decision === 'accepted') {
+                let existingSessions = await getCharacterSessions(character.id);
+                let seededLegacyIntoPrimary = false;
+                if (existingSessions.length === 0) {
+                    const createdPrimary = await ensureCharacterPrimarySession(character, {
+                        chatHistory: legacyChat,
+                        longTermMemory: legacyMemory
+                    });
+                    existingSessions = createdPrimary ? [normalizeCharacterSession(createdPrimary)] : [];
+                    seededLegacyIntoPrimary = hasLegacyData;
+                }
+
+                if (hasLegacyData) {
+                    if (!seededLegacyIntoPrimary && existingSessions.length > 0) {
+                        const primary = normalizeCharacterSession(existingSessions[0]);
+                        if (primary) {
+                            primary.chatHistory = [
+                                ...(Array.isArray(primary.chatHistory) ? primary.chatHistory : []),
+                                ...legacyChat
+                            ];
+                            primary.longTermMemory = [
+                                ...(Array.isArray(primary.longTermMemory) ? primary.longTermMemory : []),
+                                ...legacyMemory
+                            ];
+                            primary.updatedAt = Date.now();
+                            primary.lastActiveAt = Math.max(primary.lastActiveAt || 0, primary.updatedAt);
+                            await db.characterSessions.put(primary);
+                        }
+                    }
+
+                    character.chatHistory = [];
+                    character.longTermMemory = [];
+                    character.settings.legacyMigratedAt = Number(character.settings.legacyMigratedAt) || Date.now();
+                    await db.characters.put(character);
+                    character = await db.characters.get(characterId);
+                }
+                return { character, mode: 'session', pending: false };
+            }
+
+            if (hasLegacyData && askUser) {
+                const shouldMigrate = confirm(
+                    `角色 "${character.name}" 检测到旧聊天数据。\n\n` +
+                    `是否迁移为多窗口会话？\n` +
+                    `确定：迁移到“${DEFAULT_CHARACTER_SESSION_NAME}”\n` +
+                    `取消：保持旧模式（后续可再迁移）`
+                );
+                if (!shouldMigrate) {
+                    character.settings.sessionMigrationDecision = 'rejected';
+                    await db.characters.put(character);
+                    return { character, mode: 'legacy', pending: false };
+                }
+            } else if (hasLegacyData && !askUser) {
+                return { character, mode: 'legacy', pending: true };
+            }
+
+            character.settings.sessionMigrationDecision = 'accepted';
+            await db.characters.put(character);
+            await ensureCharacterPrimarySession(character, {
+                chatHistory: legacyChat,
+                longTermMemory: legacyMemory
+            });
+            if (hasLegacyData) {
+                character.chatHistory = [];
+                character.longTermMemory = [];
+            }
+            character.settings.legacyMigratedAt = Date.now();
+            await db.characters.put(character);
+            character = await db.characters.get(characterId);
+            return { character, mode: 'session', pending: false };
+        }
+
+        async function getMountedReferenceMemories(session) {
+            if (!session || session.mountMode !== 'reference' || !session.mountSourceSessionId) {
+                return [];
+            }
+            const source = await db.characterSessions.get(session.mountSourceSessionId);
+            if (!source || source.characterId !== session.characterId) return [];
+            const count = Number.isFinite(Number(session.mountMemoryCount))
+                ? Math.max(1, Math.min(50, Number(session.mountMemoryCount)))
+                : 3;
+            const sourceMemories = Array.isArray(source.longTermMemory) ? source.longTermMemory.slice(-count) : [];
+            const sourceName = source.name || DEFAULT_CHARACTER_SESSION_NAME;
+            return sourceMemories.map(mem => `[挂载来源:${sourceName}] ${mem}`);
+        }
+
+        async function collectCharacterSessionCascadeIds(rootSessionId) {
+            const sessions = (await db.characterSessions.toArray()).map(normalizeCharacterSession).filter(Boolean);
+            const bySource = {};
+            sessions.forEach(session => {
+                if (session.mountMode === 'reference' && session.mountSourceSessionId) {
+                    if (!bySource[session.mountSourceSessionId]) bySource[session.mountSourceSessionId] = [];
+                    bySource[session.mountSourceSessionId].push(session.id);
+                }
+            });
+            const queue = [rootSessionId];
+            const visited = new Set();
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (visited.has(current)) continue;
+                visited.add(current);
+                const children = bySource[current] || [];
+                children.forEach(childId => {
+                    if (!visited.has(childId)) queue.push(childId);
+                });
+            }
+            return [...visited];
+        }
+
+        function getLatestMessageTimestamp(history) {
+            if (!Array.isArray(history) || history.length === 0) return 0;
+            return Number(history[history.length - 1]?.timestamp) || 0;
+        }
+
+        async function resolveBackgroundSessionTarget(characterId) {
+            const sessions = await getCharacterSessions(characterId);
+            if (sessions.length === 0) return null;
+            const pinned = sessions.find(session => session.pinned);
+            return pinned || sessions[0];
         }
 
         // 打开角色导入弹窗
@@ -984,102 +1265,235 @@
         // 快速开始聊天
         async function quickStartChat(characterId) {
             const character = await db.characters.get(characterId);
-            if(!character) {
+            if (!character) {
                 alert('角色不存在');
                 return;
             }
-            currentEditingCharacter = character;
-            openCharacterChat();
+
+            const migration = await maybeMigrateLegacyCharacter(characterId, true);
+            if (!migration) return;
+
+            if (migration.mode === 'session') {
+                let sessions = await getCharacterSessions(characterId);
+                if (sessions.length === 0) {
+                    await ensureCharacterPrimarySession(migration.character || character);
+                    sessions = await getCharacterSessions(characterId);
+                }
+                if (sessions.length > 0) {
+                    await openCharacterSessionChat(characterId, sessions[0].id);
+                }
+                return;
+            }
+
+            currentEditingCharacter = migration.character || character;
+            currentCharacterSession = null;
+            await openCharacterChatLegacy(true);
         }
 
-        // 渲染角色列表（按分组折叠）
+        function getCharacterPreviewText(character, sessions) {
+            if (Array.isArray(sessions) && sessions.length > 0) {
+                const topSession = sessions[0];
+                const history = Array.isArray(topSession.chatHistory) ? topSession.chatHistory : [];
+                if (history.length > 0) return history[history.length - 1]?.content || '暂无消息';
+            }
+            const legacyHistory = Array.isArray(character?.chatHistory) ? character.chatHistory : [];
+            if (legacyHistory.length > 0) return legacyHistory[legacyHistory.length - 1]?.content || '暂无消息';
+            return character?.first_mes || '暂无消息';
+        }
+
+        function getSessionPreviewText(session) {
+            const history = Array.isArray(session?.chatHistory) ? session.chatHistory : [];
+            if (history.length === 0) return '暂无消息';
+            return history[history.length - 1]?.content || '暂无消息';
+        }
+
+        async function toggleCharacterSessionExpand(characterId) {
+            if (characterSessionExpandState.has(characterId)) {
+                characterSessionExpandState.delete(characterId);
+            } else {
+                characterSessionExpandState.add(characterId);
+            }
+            await renderCharacterList();
+        }
+
+        // 渲染角色列表（角色行 + 会话子列表）
         async function renderCharacterList() {
             const listDiv = document.getElementById('character-list');
 
             try {
-                const characters = await db.characters.toArray();
+                const [characters, sessionMap] = await Promise.all([
+                    db.characters.toArray(),
+                    getCharacterSessionsMap()
+                ]);
 
-                if(characters.length === 0) {
+                if (characters.length === 0) {
                     listDiv.innerHTML = '<div style="text-align:center; opacity:0.5; margin-top:50px;">暂无角色,点击右上角创建或导入</div>';
                     return;
                 }
 
                 listDiv.innerHTML = '';
 
-                // 按分组整理角色
                 const groupedChars = {};
                 const ungrouped = [];
-
                 characters.forEach(char => {
                     const group = char.settings?.group || '';
                     if (!group) {
                         ungrouped.push(char);
                     } else {
-                        if (!groupedChars[group]) {
-                            groupedChars[group] = [];
-                        }
+                        if (!groupedChars[group]) groupedChars[group] = [];
                         groupedChars[group].push(char);
                     }
                 });
 
-                // 渲染未分组的角色
                 if (ungrouped.length > 0) {
-                    renderGroupSection('未分组', ungrouped, listDiv, true);
+                    renderGroupSection('未分组', ungrouped, listDiv, true, sessionMap);
                 }
 
-                // 渲染各分组
                 Object.keys(groupedChars).sort().forEach(groupName => {
-                    renderGroupSection(groupName, groupedChars[groupName], listDiv, true);
+                    renderGroupSection(groupName, groupedChars[groupName], listDiv, true, sessionMap);
                 });
-
-            } catch(error) {
+            } catch (error) {
                 console.error('渲染角色列表失败:', error);
                 listDiv.innerHTML = '<div style="text-align:center; color:red;">加载失败</div>';
             }
         }
 
         // 渲染分组区块
-        function renderGroupSection(groupName, characters, container, expanded = true) {
+        function renderGroupSection(groupName, characters, container, expanded = true, sessionMap = {}) {
             const groupId = 'group-' + groupName.replace(/[^a-zA-Z0-9]/g, '-');
 
             const groupDiv = document.createElement('div');
-            groupDiv.style.cssText = 'margin-bottom:10px;';
+            groupDiv.className = 'char-group';
+            groupDiv.style.cssText = 'margin-bottom:6px;';
 
-            // 分组标题
             const groupHeader = document.createElement('div');
-            groupHeader.style.cssText = 'background:var(--card-bg); padding:10px 15px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); user-select:none;';
+            groupHeader.style.cssText = 'background:var(--card-bg); padding:7px 12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(0,0,0,0.1); user-select:none;';
             groupHeader.innerHTML = `
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span id="${groupId}-arrow" style="transition:transform 0.2s; ${expanded ? 'transform:rotate(90deg);' : ''}">▶</span>
-                    <span style="font-weight:bold; font-size:0.9rem;">${escapeHtml(groupName)}</span>
-                    <span style="opacity:0.5; font-size:0.75rem;">(${characters.length})</span>
+                    <span style="font-weight:bold; font-size:0.82rem;">${escapeHtml(groupName)}</span>
+                    <span style="opacity:0.5; font-size:0.7rem;">(${characters.length})</span>
                 </div>
             `;
 
-            // 分组内容
             const groupContent = document.createElement('div');
             groupContent.id = groupId;
             groupContent.style.cssText = expanded ? '' : 'display:none;';
 
             characters.forEach(char => {
-                const lastMessage = char.chatHistory && char.chatHistory.length > 0
-                    ? char.chatHistory[char.chatHistory.length - 1].content
-                    : (char.first_mes || '暂无消息');
+                const sessions = Array.isArray(sessionMap[char.id]) ? sessionMap[char.id] : [];
+                const isExpanded = characterSessionExpandState.has(char.id);
+                const inSessionMode = isCharacterSessionModeEnabled(char);
+                const previewText = getCharacterPreviewText(char, sessions);
 
-                const charDiv = document.createElement('div');
-                charDiv.className = 'qq-chat-item';
-                charDiv.onclick = () => quickStartChat(char.id);
-                charDiv.innerHTML = `
-                    <img src="${char.avatar || getAvatarPlaceholder(50)}" class="qq-chat-avatar">
-                    <div class="qq-chat-info">
-                        <div class="qq-chat-name">${escapeHtml(char.settings?.nickname || char.name)}</div>
-                        <div class="qq-chat-desc">${escapeHtml(lastMessage.substring(0, 30))}...</div>
+                const wrapper = document.createElement('div');
+                wrapper.className = 'character-entry';
+                wrapper.innerHTML = `
+                    <div class="qq-chat-item character-entry-head">
+                        <img src="${char.avatar || getAvatarPlaceholder(50)}" class="qq-chat-avatar">
+                        <div class="qq-chat-info" style="min-width:0;">
+                            <div class="qq-chat-name">${escapeHtml(char.settings?.nickname || char.name)}</div>
+                            <div class="qq-chat-desc">${escapeHtml(String(previewText).substring(0, 38))}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                            <span style="font-size:0.72rem; opacity:0.55;">${inSessionMode ? sessions.length : 1} 窗口</span>
+                            <button class="btn-sec character-entry-arrow" style="width:auto; padding:4px 8px; margin:0;">${isExpanded ? '▾' : '▸'}</button>
+                        </div>
                     </div>
+                    <div class="character-session-sublist" style="${isExpanded ? '' : 'display:none;'}"></div>
                 `;
-                groupContent.appendChild(charDiv);
+
+                const head = wrapper.querySelector('.character-entry-head');
+                const arrow = wrapper.querySelector('.character-entry-arrow');
+                const sublist = wrapper.querySelector('.character-session-sublist');
+
+                head.onclick = async () => {
+                    await toggleCharacterSessionExpand(char.id);
+                };
+                arrow.onclick = async (event) => {
+                    event.stopPropagation();
+                    await toggleCharacterSessionExpand(char.id);
+                };
+
+                if (inSessionMode) {
+                    if (sessions.length === 0) {
+                        const emptyDiv = document.createElement('div');
+                        emptyDiv.style.cssText = 'padding:10px 12px; opacity:0.6; font-size:0.78rem;';
+                        emptyDiv.textContent = '暂无会话，点击下方创建。';
+                        sublist.appendChild(emptyDiv);
+                    }
+
+                    sessions.forEach(session => {
+                        const sessionItem = document.createElement('div');
+                        sessionItem.className = 'character-session-item';
+                        sessionItem.innerHTML = `
+                            <div class="character-session-main">
+                                <div class="character-session-name">${session.pinned ? '📌 ' : ''}${escapeHtml(session.name || DEFAULT_CHARACTER_SESSION_NAME)}</div>
+                                <div class="character-session-desc">${escapeHtml(String(getSessionPreviewText(session)).substring(0, 42))}</div>
+                            </div>
+                            <button class="btn-sec character-session-action" style="width:auto; padding:2px 7px; margin:0;">⋯</button>
+                        `;
+                        sessionItem.onclick = async () => {
+                            chatOpenedFromCharacterManager = true;
+                            const panel = document.getElementById('panel-character-manager');
+                            if (panel) panel.classList.remove('active');
+                            await openCharacterSessionChat(char.id, session.id);
+                        };
+                        const actionBtn = sessionItem.querySelector('.character-session-action');
+                        actionBtn.onclick = (event) => {
+                            event.stopPropagation();
+                            openCharacterSessionContextMenu(event, session.id);
+                        };
+                        sublist.appendChild(sessionItem);
+                    });
+
+                    const createBtn = document.createElement('button');
+                    createBtn.className = 'btn-sec';
+                    createBtn.style.cssText = 'width:calc(100% - 20px); margin:5px 10px 8px; padding:6px 8px; font-size:0.73rem;';
+                    createBtn.textContent = '+ 新建窗口';
+                    createBtn.onclick = async (event) => {
+                        event.stopPropagation();
+                        await createCharacterSessionDialog(char.id);
+                    };
+                    sublist.appendChild(createBtn);
+                } else {
+                    const legacyItem = document.createElement('div');
+                    legacyItem.className = 'character-session-item';
+                    legacyItem.innerHTML = `
+                        <div class="character-session-main">
+                            <div class="character-session-name">旧模式聊天</div>
+                            <div class="character-session-desc">当前角色还未迁移到多窗口会话</div>
+                        </div>
+                        <button class="btn-sec" style="width:auto; padding:2px 7px; margin:0;">进入</button>
+                    `;
+                    legacyItem.onclick = async () => {
+                        const fullCharacter = await db.characters.get(char.id);
+                        if (!fullCharacter) return;
+                        chatOpenedFromCharacterManager = true;
+                        currentEditingCharacter = fullCharacter;
+                        currentCharacterSession = null;
+                        await openCharacterChatLegacy(true);
+                    };
+                    sublist.appendChild(legacyItem);
+
+                    const migrateBtn = document.createElement('button');
+                    migrateBtn.className = 'btn-sec';
+                    migrateBtn.style.cssText = 'width:calc(100% - 26px); margin:8px 13px 12px; padding:8px 10px; font-size:0.75rem;';
+                    migrateBtn.textContent = '迁移到多窗口';
+                    migrateBtn.onclick = async (event) => {
+                        event.stopPropagation();
+                        const result = await maybeMigrateLegacyCharacter(char.id, true, true);
+                        if (result?.mode === 'session') {
+                            showToast('已启用多窗口会话');
+                        }
+                        await renderCharacterList();
+                    };
+                    sublist.appendChild(migrateBtn);
+                }
+
+                groupContent.appendChild(wrapper);
             });
 
-            // 点击标题折叠/展开
             groupHeader.onclick = () => {
                 const content = document.getElementById(groupId);
                 const arrow = document.getElementById(groupId + '-arrow');
@@ -1095,6 +1509,323 @@
             groupDiv.appendChild(groupHeader);
             groupDiv.appendChild(groupContent);
             container.appendChild(groupDiv);
+        }
+
+        async function promptSessionMountConfig(characterId, excludeSessionId = null, defaults = {}) {
+            const rawMode = (prompt(
+                '记忆模式（blank / copy / reference）',
+                defaults.mountMode || 'blank'
+            ) || '').trim().toLowerCase();
+            const mountMode = ['blank', 'copy', 'reference'].includes(rawMode) ? rawMode : 'blank';
+
+            if (mountMode === 'blank') {
+                return {
+                    mountMode,
+                    mountSourceSessionId: null,
+                    mountMemoryCount: Number(defaults.mountMemoryCount) || 3
+                };
+            }
+
+            const sessions = await getCharacterSessions(characterId);
+            const candidates = sessions.filter(session => session.id !== excludeSessionId);
+            if (candidates.length === 0) {
+                alert('当前没有可用的来源窗口。');
+                return null;
+            }
+
+            const optionsText = candidates
+                .map((session, idx) => `${idx + 1}. ${session.pinned ? '📌 ' : ''}${session.name}`)
+                .join('\n');
+            const selectedIndex = Number(prompt(`选择来源窗口编号：\n${optionsText}`, '1'));
+            if (!Number.isFinite(selectedIndex) || selectedIndex < 1 || selectedIndex > candidates.length) {
+                alert('来源窗口选择无效。');
+                return null;
+            }
+            const source = candidates[selectedIndex - 1];
+
+            const rawCount = Number(prompt('挂载最近几条长期记忆？(1-50)', String(defaults.mountMemoryCount || 3)));
+            const mountMemoryCount = Number.isFinite(rawCount) ? Math.max(1, Math.min(50, rawCount)) : 3;
+
+            return {
+                mountMode,
+                mountSourceSessionId: source.id,
+                mountMemoryCount
+            };
+        }
+
+        async function createCharacterSessionDialog(characterId) {
+            const character = await db.characters.get(characterId);
+            if (!character) {
+                alert('角色不存在');
+                return;
+            }
+
+            const migration = await maybeMigrateLegacyCharacter(characterId, true, true);
+            if (!migration || migration.mode !== 'session') return;
+
+            const defaultName = `窗口_${new Date().toLocaleString('zh-CN', { hour12: false }).replace(/[\\/:\\s]/g, '_')}`;
+            const name = (prompt('输入新窗口名称', defaultName) || '').trim();
+            if (!name) return;
+
+            const mountConfig = await promptSessionMountConfig(characterId, null, { mountMode: 'blank', mountMemoryCount: 3 });
+            if (!mountConfig) return;
+
+            const session = await createCharacterSession(characterId, {
+                name,
+                pinned: false,
+                chatHistory: [],
+                longTermMemory: [],
+                mountMode: mountConfig.mountMode,
+                mountSourceSessionId: mountConfig.mountSourceSessionId,
+                mountMemoryCount: mountConfig.mountMemoryCount
+            });
+
+            showToast(`已创建窗口：${session.name}`);
+            await renderCharacterList();
+            await renderCharacterSessionSidebar();
+            await openCharacterSessionChat(characterId, session.id);
+        }
+
+        async function renameCharacterSession(sessionId) {
+            const session = normalizeCharacterSession(await db.characterSessions.get(sessionId));
+            if (!session) return;
+            const name = (prompt('输入新的窗口名称', session.name || DEFAULT_CHARACTER_SESSION_NAME) || '').trim();
+            if (!name || name === session.name) return;
+            session.name = name;
+            session.updatedAt = Date.now();
+            await db.characterSessions.put(session);
+
+            if (currentCharacterSession && currentCharacterSession.id === session.id) {
+                currentCharacterSession.name = name;
+                if (currentEditingCharacter) {
+                    document.getElementById('chat-character-name').textContent = `${currentEditingCharacter.name} · ${name}`;
+                }
+            }
+
+            await renderCharacterList();
+            await renderCharacterSessionSidebar();
+        }
+
+        async function toggleCharacterSessionPinned(sessionId) {
+            const session = normalizeCharacterSession(await db.characterSessions.get(sessionId));
+            if (!session) return;
+            session.pinned = !session.pinned;
+            session.updatedAt = Date.now();
+            await db.characterSessions.put(session);
+            await renderCharacterList();
+            await renderCharacterSessionSidebar();
+        }
+
+        async function duplicateCharacterSession(sessionId) {
+            const source = normalizeCharacterSession(await db.characterSessions.get(sessionId));
+            if (!source) return;
+
+            const cloned = await createCharacterSession(source.characterId, {
+                name: `${source.name} 副本`,
+                pinned: source.pinned,
+                chatHistory: Array.isArray(source.chatHistory) ? [...source.chatHistory] : [],
+                longTermMemory: Array.isArray(source.longTermMemory) ? [...source.longTermMemory] : [],
+                mountMode: source.mountMode,
+                mountSourceSessionId: source.mountSourceSessionId,
+                mountMemoryCount: source.mountMemoryCount,
+                hydrateCopyMemory: false
+            });
+
+            showToast(`已复制窗口：${cloned.name}`);
+            await renderCharacterList();
+            await renderCharacterSessionSidebar();
+            await openCharacterSessionChat(source.characterId, cloned.id);
+        }
+
+        async function updateCharacterSessionMount(sessionId) {
+            const session = normalizeCharacterSession(await db.characterSessions.get(sessionId));
+            if (!session) return;
+
+            const mountConfig = await promptSessionMountConfig(session.characterId, session.id, session);
+            if (!mountConfig) return;
+
+            session.mountMode = mountConfig.mountMode;
+            session.mountSourceSessionId = mountConfig.mountSourceSessionId;
+            session.mountMemoryCount = mountConfig.mountMemoryCount;
+            session.updatedAt = Date.now();
+
+            if (session.mountMode === 'copy' && session.mountSourceSessionId) {
+                const source = normalizeCharacterSession(await db.characterSessions.get(session.mountSourceSessionId));
+                if (source) {
+                    session.longTermMemory = (source.longTermMemory || []).slice(-session.mountMemoryCount);
+                    if (currentCharacterSession && currentCharacterSession.id === session.id && currentChatCharacter) {
+                        currentChatCharacter.longTermMemory = session.longTermMemory;
+                    }
+                }
+            }
+
+            await db.characterSessions.put(session);
+            if (currentCharacterSession && currentCharacterSession.id === session.id) {
+                currentCharacterSession = session;
+            }
+            await renderCharacterList();
+            await renderCharacterSessionSidebar();
+            showToast('窗口挂载设置已更新');
+        }
+
+        async function deleteCharacterSessionWithCascade(sessionId) {
+            const session = normalizeCharacterSession(await db.characterSessions.get(sessionId));
+            if (!session) return;
+
+            const cascadeIds = await collectCharacterSessionCascadeIds(sessionId);
+            const dependentCount = Math.max(0, cascadeIds.length - 1);
+            const confirmText = dependentCount > 0
+                ? `删除窗口 "${session.name}" 会级联删除 ${dependentCount} 个依赖窗口。\n确定继续吗？`
+                : `确定删除窗口 "${session.name}" 吗？`;
+            if (!confirm(confirmText)) return;
+            if (dependentCount > 0 && !confirm('这是不可恢复操作，是否二次确认删除？')) return;
+
+            await db.transaction('rw', db.characterSessions, async () => {
+                await db.characterSessions.bulkDelete(cascadeIds);
+            });
+
+            const removedCurrent = currentCharacterSession && cascadeIds.includes(currentCharacterSession.id);
+            await renderCharacterList();
+            await renderCharacterSessionSidebar();
+
+            if (removedCurrent) {
+                const remaining = await getCharacterSessions(session.characterId);
+                if (remaining.length > 0) {
+                    await openCharacterSessionChat(session.characterId, remaining[0].id);
+                } else {
+                    await closeCharacterChat();
+                }
+            }
+        }
+
+        function hideCharacterSessionContextMenu() {
+            const menu = document.getElementById('character-session-menu');
+            if (menu) menu.classList.remove('active');
+            currentCharacterSessionMenuSessionId = null;
+        }
+
+        async function openCharacterSessionContextMenu(event, sessionId) {
+            const menu = document.getElementById('character-session-menu');
+            if (!menu) return;
+            event.preventDefault();
+
+            currentCharacterSessionMenuSessionId = sessionId;
+            const session = normalizeCharacterSession(await db.characterSessions.get(sessionId));
+            const pinEl = document.getElementById('character-session-menu-pin');
+            if (pinEl) pinEl.textContent = session?.pinned ? '取消置顶' : '📌 置顶';
+
+            // 先显示以获取尺寸
+            menu.style.left = '-9999px';
+            menu.style.top = '-9999px';
+            menu.classList.add('active');
+
+            const menuW = menu.offsetWidth;
+            const menuH = menu.offsetHeight;
+            const winW = window.innerWidth;
+            const winH = window.innerHeight;
+            let posX = event.clientX;
+            let posY = event.clientY;
+            if (posX + menuW > winW - 8) posX = winW - menuW - 8;
+            if (posX < 8) posX = 8;
+            if (posY + menuH > winH - 8) posY = winH - menuH - 8;
+            if (posY < 8) posY = 8;
+
+            menu.style.left = `${posX}px`;
+            menu.style.top = `${posY}px`;
+
+            if (!characterSessionMenuBound) {
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#character-session-menu')) {
+                        hideCharacterSessionContextMenu();
+                    }
+                });
+                characterSessionMenuBound = true;
+            }
+        }
+
+        async function handleCharacterSessionMenuAction(action) {
+            const sessionId = currentCharacterSessionMenuSessionId;
+            hideCharacterSessionContextMenu();
+            if (!sessionId) return;
+
+            if (action === 'rename') {
+                await renameCharacterSession(sessionId);
+            } else if (action === 'pin') {
+                await toggleCharacterSessionPinned(sessionId);
+            } else if (action === 'copy') {
+                await duplicateCharacterSession(sessionId);
+            } else if (action === 'mount') {
+                await updateCharacterSessionMount(sessionId);
+            } else if (action === 'delete') {
+                await deleteCharacterSessionWithCascade(sessionId);
+            }
+        }
+
+        function closeCharacterSessionSidebar() {
+            const overlay = document.getElementById('character-session-overlay');
+            const sidebar = document.getElementById('character-session-sidebar');
+            if (overlay) overlay.classList.remove('active');
+            if (sidebar) sidebar.classList.remove('active');
+        }
+
+        async function openCharacterSessionSidebar() {
+            if (!currentEditingCharacter || currentReadingRoom) return;
+            const overlay = document.getElementById('character-session-overlay');
+            const sidebar = document.getElementById('character-session-sidebar');
+            if (overlay) overlay.classList.add('active');
+            if (sidebar) sidebar.classList.add('active');
+            await renderCharacterSessionSidebar();
+        }
+
+        async function renderCharacterSessionSidebar() {
+            const listEl = document.getElementById('character-session-sidebar-list');
+            const titleEl = document.getElementById('character-session-sidebar-title');
+            const createBtn = document.getElementById('character-session-sidebar-create');
+            if (!listEl || !titleEl || !createBtn) return;
+
+            if (!currentEditingCharacter || currentReadingRoom) {
+                titleEl.textContent = '会话';
+                listEl.innerHTML = '<div style="padding:20px; text-align:center; opacity:0.6;">当前模式不可用</div>';
+                createBtn.style.display = 'none';
+                return;
+            }
+
+            titleEl.textContent = `${currentEditingCharacter.name} · 会话`;
+            createBtn.style.display = 'block';
+            createBtn.onclick = async () => {
+                await createCharacterSessionDialog(currentEditingCharacter.id);
+            };
+
+            const sessions = await getCharacterSessions(currentEditingCharacter.id);
+            if (sessions.length === 0) {
+                listEl.innerHTML = '<div style="padding:20px; text-align:center; opacity:0.6;">暂无会话</div>';
+                return;
+            }
+
+            listEl.innerHTML = '';
+            sessions.forEach(session => {
+                const item = document.createElement('div');
+                item.className = 'character-session-sidebar-item';
+                const active = currentCharacterSession && currentCharacterSession.id === session.id;
+                if (active) item.classList.add('active');
+                item.innerHTML = `
+                    <div class="character-session-main">
+                        <div class="character-session-name">${session.pinned ? '📌 ' : ''}${escapeHtml(session.name)}</div>
+                        <div class="character-session-desc">${escapeHtml(String(getSessionPreviewText(session)).substring(0, 52))}</div>
+                    </div>
+                    <button class="btn-sec" style="width:auto; padding:2px 7px; margin:0;">⋯</button>
+                `;
+                item.onclick = async () => {
+                    closeCharacterSessionSidebar();
+                    await openCharacterSessionChat(currentEditingCharacter.id, session.id);
+                };
+                const menuBtn = item.querySelector('button');
+                menuBtn.onclick = (event) => {
+                    event.stopPropagation();
+                    openCharacterSessionContextMenu(event, session.id);
+                };
+                listEl.appendChild(item);
+            });
         }
         
         function formatBingoProjectForAI(project) {
@@ -1126,6 +1857,7 @@ ${gridText}`;
         // --- [Vesper] 新增聊天记录管理功能 ---
         let lastSearchKeyword = '';
         let lastSearchCharacterId = null;
+        let lastSearchSessionId = null;
 
         function searchChatHistory() {
             if (!currentEditingCharacter) return;
@@ -1140,8 +1872,11 @@ ${gridText}`;
 
             lastSearchKeyword = keyword;
             lastSearchCharacterId = currentEditingCharacter.id;
+            lastSearchSessionId = currentCharacterSession ? currentCharacterSession.id : null;
 
-            const chatHistory = currentEditingCharacter.chatHistory || [];
+            const chatHistory = (currentChatCharacter && Array.isArray(currentChatCharacter.chatHistory))
+                ? currentChatCharacter.chatHistory
+                : (currentEditingCharacter.chatHistory || []);
             const results = [];
 
             chatHistory.forEach((msg, index) => {
@@ -1161,7 +1896,7 @@ ${gridText}`;
             }
 
             // 显示搜索结果面板
-            showSearchResults(results, keyword, currentEditingCharacter.name);
+            showSearchResults(results, keyword, currentChatCharacter?.name || currentEditingCharacter.name);
         }
 
         function showSearchResults(results, keyword, characterName) {
@@ -1210,8 +1945,25 @@ ${gridText}`;
             if (lastSearchCharacterId) {
                 const character = await db.characters.get(lastSearchCharacterId);
                 if (character) {
-                    currentChatCharacter = character;
                     currentEditingCharacter = character;
+
+                    if (lastSearchSessionId) {
+                        await openCharacterSessionChat(lastSearchCharacterId, lastSearchSessionId, false);
+                    } else if (isCharacterSessionModeEnabled(character)) {
+                        let sessions = await getCharacterSessions(lastSearchCharacterId);
+                        if (sessions.length === 0) {
+                            const primary = await ensureCharacterPrimarySession(character);
+                            sessions = primary ? [normalizeCharacterSession(primary)] : [];
+                        }
+                        if (sessions.length > 0) {
+                            await openCharacterSessionChat(lastSearchCharacterId, sessions[0].id, false);
+                        } else {
+                            currentChatCharacter = character;
+                            await openCharacterChatLegacy(false);
+                        }
+                    } else {
+                        await openCharacterChatLegacy(false);
+                    }
                 }
             }
 
@@ -1221,19 +1973,11 @@ ${gridText}`;
 
             // 打开聊天界面
             if (currentChatCharacter) {
-                // 设置聊天界面
-                document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
-                document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
-
                 // 展开历史（确保能找到消息）
                 isHistoryCollapsed = false;
 
                 // 渲染聊天历史
                 renderCharacterChatHistory();
-
-                // 显示聊天界面
-                document.getElementById('character-chat-screen').style.display = 'flex';
-                document.body.classList.add('no-scroll');
 
                 // 等待渲染完成后滚动到目标消息
                 setTimeout(() => {
@@ -1265,35 +2009,48 @@ ${gridText}`;
         function exportChatHistory() {
             if (!currentEditingCharacter) return;
 
-            // 阅读室模式：导出阅读室的聊天记录，而非角色原始记录
             const isReadingRoom = !!currentReadingRoom;
-            const chatHistory = isReadingRoom
-                ? (currentReadingRoom.chatHistory || [])
-                : (currentEditingCharacter.chatHistory || []);
-            const sourceName = isReadingRoom
-                ? `${currentEditingCharacter.name}_${currentReadingRoom.name}`
-                : currentEditingCharacter.name;
+            const isSessionMode = !!currentCharacterSession && !isReadingRoom;
 
+            let chatHistory = [];
+            let longTermMemory = [];
+            let sourceName = currentEditingCharacter.name;
             const chatData = {
                 characterName: currentEditingCharacter.name,
                 characterId: currentEditingCharacter.id,
-                exportDate: new Date().toISOString(),
-                chatHistory: chatHistory,
-                longTermMemory: currentEditingCharacter.longTermMemory || []
+                exportDate: new Date().toISOString()
             };
 
-            // 阅读室模式额外保存阅读室信息
             if (isReadingRoom) {
+                chatHistory = currentReadingRoom.chatHistory || [];
+                longTermMemory = Array.isArray(currentReadingRoom.longTermMemory) ? currentReadingRoom.longTermMemory : [];
+                sourceName = `${currentEditingCharacter.name}_${currentReadingRoom.name}`;
                 chatData.readingRoom = {
                     id: currentReadingRoom.id,
                     name: currentReadingRoom.name,
                     bookId: currentReadingRoom.bookId
                 };
+            } else if (isSessionMode) {
+                chatHistory = currentCharacterSession.chatHistory || [];
+                longTermMemory = currentCharacterSession.longTermMemory || [];
+                sourceName = `${currentEditingCharacter.name}_${currentCharacterSession.name || DEFAULT_CHARACTER_SESSION_NAME}`;
+                chatData.session = {
+                    id: currentCharacterSession.id,
+                    name: currentCharacterSession.name || DEFAULT_CHARACTER_SESSION_NAME,
+                    mountMode: currentCharacterSession.mountMode || 'blank',
+                    mountSourceSessionId: currentCharacterSession.mountSourceSessionId || null,
+                    mountMemoryCount: Number(currentCharacterSession.mountMemoryCount) || 3
+                };
+            } else {
+                chatHistory = currentEditingCharacter.chatHistory || [];
+                longTermMemory = currentEditingCharacter.longTermMemory || [];
             }
+
+            chatData.chatHistory = chatHistory;
+            chatData.longTermMemory = longTermMemory;
 
             const dataStr = JSON.stringify(chatData, null, 2);
             const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-
             const exportFileDefaultName = `chat_${sourceName}_${Date.now()}.json`;
 
             const linkElement = document.createElement('a');
@@ -1301,14 +2058,33 @@ ${gridText}`;
             linkElement.setAttribute('download', exportFileDefaultName);
             linkElement.click();
 
-            const sourceLabel = isReadingRoom ? `阅读室"${currentReadingRoom.name}"` : '角色';
-            alert(`${sourceLabel}聊天记录已导出!\n包含 ${chatData.chatHistory.length} 条对话`);
+            const sourceLabel = isReadingRoom
+                ? `阅读室 "${currentReadingRoom.name}"`
+                : isSessionMode
+                    ? `窗口 "${currentCharacterSession.name || DEFAULT_CHARACTER_SESSION_NAME}"`
+                    : `角色 "${currentEditingCharacter.name}"`;
+            alert(`${sourceLabel} 聊天记录已导出\n包含 ${chatData.chatHistory.length} 条对话`);
+        }
+
+        // 聊天记录去重追加：基于 timestamp+role 去重
+        function mergeChat(existing, incoming) {
+            const seen = new Set();
+            existing.forEach(m => { if (m.timestamp) seen.add(`${m.timestamp}|${m.role}`); });
+            const newMsgs = incoming.filter(m => !m.timestamp || !seen.has(`${m.timestamp}|${m.role}`));
+            return [...existing, ...newMsgs];
+        }
+        // 长期记忆去重追加：基于完整字符串去重
+        function mergeMemory(existing, incoming) {
+            const seen = new Set(existing);
+            const newEntries = incoming.filter(m => !seen.has(m));
+            return [...existing, ...newEntries];
         }
 
         function importChatHistory() {
             if (!currentEditingCharacter) return;
 
             const isReadingRoom = !!currentReadingRoom;
+            const isSessionMode = !!currentCharacterSession && !isReadingRoom;
 
             const input = document.createElement('input');
             input.type = 'file';
@@ -1322,72 +2098,110 @@ ${gridText}`;
                 reader.onload = async (event) => {
                     try {
                         const importedData = JSON.parse(event.target.result);
-
-                        // 验证数据格式
                         if (!importedData.chatHistory || !Array.isArray(importedData.chatHistory)) {
                             alert('导入失败：文件格式不正确');
                             return;
                         }
 
                         const importCount = importedData.chatHistory.length;
-                        // 阅读室模式操作阅读室记录，普通模式操作角色记录
                         const currentHistory = isReadingRoom
                             ? (currentReadingRoom.chatHistory || [])
-                            : (currentEditingCharacter.chatHistory || []);
+                            : isSessionMode
+                                ? (currentCharacterSession.chatHistory || [])
+                                : (currentEditingCharacter.chatHistory || []);
                         const currentCount = currentHistory.length;
-                        const targetLabel = isReadingRoom ? `阅读室"${currentReadingRoom.name}"` : '角色';
+                        const targetLabel = isReadingRoom
+                            ? `阅读室 "${currentReadingRoom.name}"`
+                            : isSessionMode
+                                ? `窗口 "${currentCharacterSession.name || DEFAULT_CHARACTER_SESSION_NAME}"`
+                                : `角色 "${currentEditingCharacter.name}"`;
 
-                        const action = confirm(
-                            `导入到${targetLabel}：\n\n` +
-                            `当前聊天记录：${currentCount}条\n` +
-                            `导入文件包含：${importCount}条\n\n` +
-                            `点击"确定"：覆盖当前记录\n` +
-                            `点击"取消"：追加到现有记录`
+                        const overwrite = confirm(
+                            `导入到 ${targetLabel}\n\n` +
+                            `当前聊天记录：${currentCount} 条\n` +
+                            `导入文件包含：${importCount} 条\n\n` +
+                            `点击“确定”：覆盖当前记录\n` +
+                            `点击“取消”：追加到现有记录`
                         );
 
                         if (isReadingRoom) {
-                            // === 阅读室模式：操作阅读室记录 ===
-                            if (action) {
-                                currentReadingRoom.chatHistory = importedData.chatHistory;
+                            if (overwrite) {
+                                currentReadingRoom.chatHistory = [...importedData.chatHistory];
                             } else {
                                 if (!currentReadingRoom.chatHistory) currentReadingRoom.chatHistory = [];
-                                currentReadingRoom.chatHistory.push(...importedData.chatHistory);
+                                currentReadingRoom.chatHistory = mergeChat(currentReadingRoom.chatHistory, importedData.chatHistory);
                             }
-                            currentReadingRoom.lastActiveDate = Date.now();
-                            await db.readingRooms.put(currentReadingRoom);
-                            // 同步工作副本
-                            if (currentChatCharacter) {
-                                currentChatCharacter.chatHistory = currentReadingRoom.chatHistory;
+
+                            if (Array.isArray(importedData.longTermMemory) && importedData.longTermMemory.length > 0) {
+                                if (overwrite) {
+                                    currentChatCharacter.longTermMemory = [...importedData.longTermMemory];
+                                } else {
+                                    if (!Array.isArray(currentChatCharacter.longTermMemory)) currentChatCharacter.longTermMemory = [];
+                                    currentChatCharacter.longTermMemory = mergeMemory(currentChatCharacter.longTermMemory, importedData.longTermMemory);
+                                }
+                                await persistCurrentLongTermMemory();
                             }
-                            const newCount = currentReadingRoom.chatHistory.length;
-                            document.getElementById('chat-message-count').textContent = newCount;
-                            document.getElementById('chat-token-estimate').textContent = '~' + (newCount * 100);
-                            alert(`${targetLabel}导入成功！\n当前共有 ${newCount} 条聊天记录`);
-                        } else {
-                            // === 普通模式：操作角色原始记录 ===
-                            if (action) {
-                                currentEditingCharacter.chatHistory = importedData.chatHistory;
-                                if (importedData.longTermMemory) {
-                                    currentEditingCharacter.longTermMemory = importedData.longTermMemory;
+
+                            currentChatCharacter.chatHistory = currentReadingRoom.chatHistory;
+                            await saveCurrentChatState();
+                        } else if (isSessionMode) {
+                            if (overwrite) {
+                                currentChatCharacter.chatHistory = [...importedData.chatHistory];
+                                currentCharacterSession.chatHistory = currentChatCharacter.chatHistory;
+
+                                if (Array.isArray(importedData.longTermMemory)) {
+                                    currentChatCharacter.longTermMemory = [...importedData.longTermMemory];
+                                    currentCharacterSession.longTermMemory = currentChatCharacter.longTermMemory;
+                                }
+
+                                if (importedData.session && typeof importedData.session === 'object') {
+                                    const importedMode = importedData.session.mountMode;
+                                    currentCharacterSession.mountMode = ['blank', 'copy', 'reference'].includes(importedMode) ? importedMode : (currentCharacterSession.mountMode || 'blank');
+                                    currentCharacterSession.mountSourceSessionId = importedData.session.mountSourceSessionId || null;
+                                    currentCharacterSession.mountMemoryCount = Number.isFinite(Number(importedData.session.mountMemoryCount))
+                                        ? Math.max(1, Math.min(50, Number(importedData.session.mountMemoryCount)))
+                                        : (currentCharacterSession.mountMemoryCount || 3);
                                 }
                             } else {
-                                if (!currentEditingCharacter.chatHistory) currentEditingCharacter.chatHistory = [];
-                                currentEditingCharacter.chatHistory.push(...importedData.chatHistory);
+                                if (!Array.isArray(currentChatCharacter.chatHistory)) currentChatCharacter.chatHistory = [];
+                                currentChatCharacter.chatHistory = mergeChat(currentChatCharacter.chatHistory, importedData.chatHistory);
+                                currentCharacterSession.chatHistory = currentChatCharacter.chatHistory;
+
                                 if (importedData.longTermMemory && importedData.longTermMemory.length > 0) {
-                                    if (!currentEditingCharacter.longTermMemory) currentEditingCharacter.longTermMemory = [];
-                                    currentEditingCharacter.longTermMemory.push(...importedData.longTermMemory);
+                                    if (!Array.isArray(currentChatCharacter.longTermMemory)) currentChatCharacter.longTermMemory = [];
+                                    currentChatCharacter.longTermMemory = mergeMemory(currentChatCharacter.longTermMemory, importedData.longTermMemory);
+                                    currentCharacterSession.longTermMemory = currentChatCharacter.longTermMemory;
                                 }
                             }
-                            await db.characters.put(currentEditingCharacter);
-                            const newCount = currentEditingCharacter.chatHistory.length;
-                            document.getElementById('chat-message-count').textContent = newCount;
-                            document.getElementById('chat-token-estimate').textContent = '~' + (newCount * 100);
-                            alert(`导入成功！\n当前共有 ${newCount} 条聊天记录`);
+
+                            await saveCurrentChatState();
+                            await renderCharacterList();
+                            await renderCharacterSessionSidebar();
+                        } else {
+                            if (overwrite) {
+                                currentEditingCharacter.chatHistory = [...importedData.chatHistory];
+                                if (Array.isArray(importedData.longTermMemory)) {
+                                    currentEditingCharacter.longTermMemory = [...importedData.longTermMemory];
+                                }
+                            } else {
+                                if (!Array.isArray(currentEditingCharacter.chatHistory)) currentEditingCharacter.chatHistory = [];
+                                currentEditingCharacter.chatHistory = mergeChat(currentEditingCharacter.chatHistory, importedData.chatHistory);
+                                if (Array.isArray(importedData.longTermMemory) && importedData.longTermMemory.length > 0) {
+                                    if (!Array.isArray(currentEditingCharacter.longTermMemory)) currentEditingCharacter.longTermMemory = [];
+                                    currentEditingCharacter.longTermMemory = mergeMemory(currentEditingCharacter.longTermMemory, importedData.longTermMemory);
+                                }
+                            }
+                            currentChatCharacter = currentEditingCharacter;
+                            await saveCurrentChatState();
                         }
 
+                        renderCharacterChatHistory();
+                        const newCount = Array.isArray(currentChatCharacter?.chatHistory) ? currentChatCharacter.chatHistory.length : 0;
+                        updateChatMessageCounter(newCount);
+                        alert(`${targetLabel} 导入成功\n当前共有 ${newCount} 条聊天记录`);
                     } catch (error) {
                         console.error('导入失败:', error);
-                        alert('导入失败：' + error.message);
+                        alert('导入失败: ' + error.message);
                     }
                 };
                 reader.readAsText(file);
@@ -1396,16 +2210,36 @@ ${gridText}`;
             input.click();
         }
 
-        function clearChatHistory() {
-            if(!currentEditingCharacter) return;
-            if(confirm(`确定清空角色 "${currentEditingCharacter.name}" 的所有聊天记录吗?`)) {
+        async function clearChatHistory() {
+            if (!currentEditingCharacter) return;
+
+            const targetLabel = currentReadingRoom
+                ? `阅读室 "${currentReadingRoom.name}"`
+                : currentCharacterSession
+                    ? `窗口 "${currentCharacterSession.name || DEFAULT_CHARACTER_SESSION_NAME}"`
+                    : `角色 "${currentEditingCharacter.name}"`;
+
+            if (!confirm(`确定清空 ${targetLabel} 的所有聊天记录吗？`)) return;
+
+            if (currentReadingRoom) {
+                currentReadingRoom.chatHistory = [];
+                if (currentChatCharacter) currentChatCharacter.chatHistory = [];
+                await saveCurrentChatState();
+            } else if (currentCharacterSession) {
+                currentCharacterSession.chatHistory = [];
+                if (currentChatCharacter) currentChatCharacter.chatHistory = [];
+                await saveCurrentChatState();
+                await renderCharacterList();
+                await renderCharacterSessionSidebar();
+            } else {
                 currentEditingCharacter.chatHistory = [];
-                db.characters.put(currentEditingCharacter).then(() => {
-                    alert('聊天记录已清空');
-                    // 更新UI显示
-                    document.getElementById('chat-message-count').textContent = '0';
-                });
+                currentChatCharacter = currentEditingCharacter;
+                await saveCurrentChatState();
             }
+
+            renderCharacterChatHistory();
+            updateChatMessageCounter(0);
+            alert(`${targetLabel} 聊天记录已清空`);
         }
         function populateBingoCardsDropdown() {
             const select = document.getElementById('character-detail-bingo-link');
@@ -1927,73 +2761,256 @@ ${gridText}`;
         async function deleteCharacter() {
             if(!currentEditingCharacter) return;
             if(!confirm(`确定删除角色 "${currentEditingCharacter.name}"? 聊天记录也会被删除。`)) return;
-            
-            await db.characters.delete(currentEditingCharacter.id);
+
+            await db.transaction('rw', db.characters, db.characterSessions, async () => {
+                await db.characterSessions.where('characterId').equals(currentEditingCharacter.id).delete();
+                await db.characters.delete(currentEditingCharacter.id);
+            });
+
+            if (currentCharacterSession && currentCharacterSession.characterId === currentEditingCharacter.id) {
+                currentCharacterSession = null;
+            }
+
             closeModal('modal-character-detail');
             await renderCharacterList();
             alert('角色已删除');
         }
 
-        // 打开角色聊天界面
-        function openCharacterChat() {
+        // 打开旧模式角色聊天界面
+        async function openCharacterChatLegacy(focusInput = true) {
             if(!currentEditingCharacter) return;
 
-            resetUI(); // 强制清场
+            if (typeof closeCharacterSessionSidebar === 'function') closeCharacterSessionSidebar();
+            if (typeof hideCharacterSessionContextMenu === 'function') hideCharacterSessionContextMenu();
+            resetUI();
             document.body.classList.add('no-scroll');
 
+            currentCharacterSession = null;
+            currentReadingRoom = null;
             currentChatCharacter = currentEditingCharacter;
             updateReadingSpoilerToggle();
+            const sessionBtn = document.getElementById('chat-session-btn');
+            if (sessionBtn) sessionBtn.style.display = 'inline-flex';
 
-            // 设置聊天界面
             document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
             document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
 
-            // 渲染聊天历史
-            renderCharacterChatHistory();
+            const visibleCount = Array.isArray(currentChatCharacter.chatHistory)
+                ? currentChatCharacter.chatHistory.filter(msg => !msg.hidden).length
+                : 0;
+            isHistoryCollapsed = visibleCount > COLLAPSE_THRESHOLD;
 
-            // 显示聊天界面
+            renderCharacterChatHistory();
             document.getElementById('character-chat-screen').style.display = 'flex';
 
-            // 聚焦输入框
-            setTimeout(() => {
-                document.getElementById('character-chat-input').focus();
-            }, 300);
+            if (focusInput) {
+                setTimeout(() => {
+                    document.getElementById('character-chat-input').focus();
+                }, 300);
+            }
+
+            if (typeof renderCharacterSessionSidebar === 'function') {
+                await renderCharacterSessionSidebar();
+            }
+        }
+
+        async function openCharacterSessionChat(characterId, sessionId, focusInput = true) {
+            const character = await db.characters.get(characterId);
+            if (!character) {
+                alert('角色不存在');
+                return;
+            }
+
+            if (!isCharacterSessionModeEnabled(character)) {
+                currentEditingCharacter = character;
+                await openCharacterChatLegacy(focusInput);
+                return;
+            }
+
+            let session = await db.characterSessions.get(sessionId);
+            if (!session || session.characterId !== characterId) {
+                const sessions = await getCharacterSessions(characterId);
+                session = sessions[0] || null;
+            }
+            if (!session) {
+                session = await ensureCharacterPrimarySession(character);
+            }
+            session = normalizeCharacterSession(session);
+
+            currentEditingCharacter = character;
+            currentCharacterSession = session;
+            currentReadingRoom = null;
+            currentChatCharacter = {
+                ...character,
+                chatHistory: session.chatHistory,
+                longTermMemory: session.longTermMemory
+            };
+
+            if (typeof hideCharacterSessionContextMenu === 'function') hideCharacterSessionContextMenu();
+            resetUI();
+            document.body.classList.add('no-scroll');
+            updateReadingSpoilerToggle();
+            const sessionBtn = document.getElementById('chat-session-btn');
+            if (sessionBtn) sessionBtn.style.display = 'inline-flex';
+
+            document.getElementById('chat-avatar').src = character.avatar || getAvatarPlaceholder(40);
+            document.getElementById('chat-character-name').textContent = `${character.name} · ${session.name || DEFAULT_CHARACTER_SESSION_NAME}`;
+
+            const visibleCount = Array.isArray(currentChatCharacter.chatHistory)
+                ? currentChatCharacter.chatHistory.filter(msg => !msg.hidden).length
+                : 0;
+            isHistoryCollapsed = visibleCount > COLLAPSE_THRESHOLD;
+
+            renderCharacterChatHistory();
+            document.getElementById('character-chat-screen').style.display = 'flex';
+
+            const now = Date.now();
+            currentCharacterSession.lastActiveAt = now;
+            currentCharacterSession.updatedAt = now;
+            await db.characterSessions.put(normalizeCharacterSession(currentCharacterSession));
+
+            if (focusInput) {
+                setTimeout(() => {
+                    document.getElementById('character-chat-input').focus();
+                }, 300);
+            }
+
+            if (typeof renderCharacterSessionSidebar === 'function') {
+                await renderCharacterSessionSidebar();
+            }
+            await renderCharacterList();
+        }
+
+        // 打开角色聊天界面（自动按迁移模式路由）
+        async function openCharacterChat() {
+            if(!currentEditingCharacter) return;
+
+            const migration = await maybeMigrateLegacyCharacter(currentEditingCharacter.id, true);
+            if (!migration) return;
+
+            if (migration.mode === 'session') {
+                let sessions = await getCharacterSessions(currentEditingCharacter.id);
+                if (sessions.length === 0) {
+                    await ensureCharacterPrimarySession(migration.character || currentEditingCharacter);
+                    sessions = await getCharacterSessions(currentEditingCharacter.id);
+                }
+                if (sessions.length > 0) {
+                    await openCharacterSessionChat(currentEditingCharacter.id, sessions[0].id);
+                }
+                return;
+            }
+
+            currentEditingCharacter = migration.character || currentEditingCharacter;
+            await openCharacterChatLegacy(true);
         }
 
         // [统一保存] 根据当前模式保存聊天状态到正确的存储位置
-        // 阅读室模式 -> 保存到 readingRooms（不污染角色原始聊天记录）
-        // 普通模式 -> 保存到 characters
         async function saveCurrentChatState() {
             if (!currentChatCharacter) return;
+            const now = Date.now();
             if (currentReadingRoom) {
                 currentReadingRoom.chatHistory = currentChatCharacter.chatHistory;
-                currentReadingRoom.lastActiveDate = Date.now();
+                currentReadingRoom.longTermMemory = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
+                currentReadingRoom.lastActiveDate = now;
                 await db.readingRooms.put(currentReadingRoom);
+            } else if (currentCharacterSession) {
+                currentCharacterSession.chatHistory = Array.isArray(currentChatCharacter.chatHistory) ? currentChatCharacter.chatHistory : [];
+                currentCharacterSession.longTermMemory = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
+                currentCharacterSession.updatedAt = now;
+                currentCharacterSession.lastActiveAt = now;
+                await db.characterSessions.put(normalizeCharacterSession(currentCharacterSession));
             } else {
-                await db.characters.put(currentChatCharacter);
+                // 安全检查：确保 currentChatCharacter 就是角色本体，防止阅读室/会话的工作副本被误写入角色
+                if (currentChatCharacter === currentEditingCharacter) {
+                    await db.characters.put(currentChatCharacter);
+                } else {
+                    console.warn('[saveCurrentChatState] 跳过保存：currentChatCharacter 不是角色本体（可能是已关闭的阅读室/会话残留）');
+                }
+            }
+        }
+
+        async function saveCurrentCharacterMetaFields(fields = {}) {
+            if (!currentEditingCharacter || !currentEditingCharacter.id) return;
+            const payload = { ...fields };
+            if (Object.keys(payload).length === 0) return;
+
+            await db.characters.update(currentEditingCharacter.id, payload);
+            currentEditingCharacter = { ...currentEditingCharacter, ...payload };
+
+            if (currentChatCharacter && currentChatCharacter.id === currentEditingCharacter.id) {
+                Object.assign(currentChatCharacter, payload);
+            }
+        }
+
+        async function persistCurrentLongTermMemory() {
+            if (!currentChatCharacter) return;
+
+            if (currentReadingRoom) {
+                const memory = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
+                currentReadingRoom.longTermMemory = memory;
+                await db.readingRooms.put(currentReadingRoom);
+                return;
+            }
+
+            if (currentCharacterSession) {
+                currentCharacterSession.longTermMemory = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
+                currentCharacterSession.updatedAt = Date.now();
+                await db.characterSessions.put(normalizeCharacterSession(currentCharacterSession));
+                return;
+            }
+
+            // 安全检查：仅 legacy 模式（非阅读室/非会话的工作副本）才写角色本体
+            if (currentChatCharacter === currentEditingCharacter) {
+                const memory = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
+                await saveCurrentCharacterMetaFields({ longTermMemory: memory });
             }
         }
 
         // 关闭角色聊天界面
         async function closeCharacterChat() {
-            // 如果在阅读室模式，保存聊天记录到阅读室
             if (currentReadingRoom) {
                 try {
                     currentReadingRoom.chatHistory = currentChatCharacter ? currentChatCharacter.chatHistory : [];
+                    currentReadingRoom.longTermMemory = currentChatCharacter ? (Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : []) : [];
                     currentReadingRoom.lastActiveDate = Date.now();
                     await db.readingRooms.put(currentReadingRoom);
                 } catch (e) {
                     console.error('[阅读室] 保存聊天记录失败:', e);
                 }
                 currentReadingRoom = null;
+                currentChatCharacter = null;  // 立刻清理，阻断任何残留异步操作写入角色本体
                 updateReadingSpoilerToggle();
             }
+
+            if (currentCharacterSession) {
+                try {
+                    await saveCurrentChatState();
+                } catch (e) {
+                    console.error('[会话] 保存聊天记录失败:', e);
+                }
+            }
+
+            if (typeof closeCharacterSessionSidebar === 'function') closeCharacterSessionSidebar();
+            if (typeof hideCharacterSessionContextMenu === 'function') hideCharacterSessionContextMenu();
+
             const chatScreen = document.getElementById('character-chat-screen');
             chatScreen.style.display = 'none';
-            chatScreen.style.zIndex = '5000'; // 恢复默认 z-index
+            chatScreen.style.zIndex = '5000';
             document.getElementById('modal-character-detail').classList.remove('active');
             currentChatCharacter = null;
-            resetUI();
+            currentCharacterSession = null;
+
+            if (chatOpenedFromCharacterManager) {
+                chatOpenedFromCharacterManager = false;
+                document.body.classList.remove('no-scroll');
+                const panel = document.getElementById('panel-character-manager');
+                if (panel) {
+                    panel.classList.add('active');
+                    await renderCharacterList();
+                }
+            } else {
+                resetUI();
+            }
         }
 
         function closeSettingsAndReturnToChat() {
@@ -2013,7 +3030,6 @@ ${gridText}`;
             if(!currentChatCharacter) return;
             document.getElementById('character-chat-screen').style.display = 'none';
             openCharacterDetail(currentChatCharacter.id);
-            // 阅读室模式下，角色详情弹窗需要更高的 z-index
             if (currentReadingRoom) {
                 const detailModal = document.getElementById('modal-character-detail');
                 if (detailModal) detailModal.style.zIndex = '9500';
@@ -2022,7 +3038,8 @@ ${gridText}`;
 
         // 全局变量：控制历史折叠
         let isHistoryCollapsed = false;
-        const COLLAPSE_THRESHOLD = 40; // 超过40条消息时显示折叠按钮
+        const COLLAPSE_THRESHOLD = 120;
+        const RECENT_RENDER_COUNT = 40;
 
         // 渲染聊天历史
         function renderCharacterChatHistory() {
@@ -2046,13 +3063,13 @@ ${gridText}`;
             // 如果启用折叠且消息数超过阈值，只显示最近的消息
             let messagesToShow = visibleMessages;
             if (isHistoryCollapsed && totalCount > COLLAPSE_THRESHOLD) {
-                // 只显示最近30条
-                messagesToShow = visibleMessages.slice(-30);
+                // 仅渲染最近 N 条，减少长会话卡顿
+                messagesToShow = visibleMessages.slice(-RECENT_RENDER_COUNT);
 
                 // 添加"加载更多"按钮
                 const loadMoreBtn = document.createElement('div');
                 loadMoreBtn.style.cssText = 'text-align:center; padding:10px; margin-bottom:15px;';
-                loadMoreBtn.innerHTML = `<button class="btn-sec" onclick="loadMoreHistory()" style="font-size:0.8rem;">📜 加载更多历史 (已折叠${totalCount - 30}条)</button>`;
+                loadMoreBtn.innerHTML = `<button class="btn-sec" onclick="loadMoreHistory()" style="font-size:0.8rem;">📜 加载更多历史 (已折叠 ${totalCount - RECENT_RENDER_COUNT} 条)</button>`;
                 container.appendChild(loadMoreBtn);
             }
 
@@ -2673,14 +3690,8 @@ ${gridText}`;
             // 添加到历史
             currentChatCharacter.chatHistory.push(userMsg);
 
-            // 根据模式保存到不同的位置
-            if (currentReadingRoom) {
-                currentReadingRoom.chatHistory = currentChatCharacter.chatHistory;
-                currentReadingRoom.lastActiveDate = Date.now();
-                await db.readingRooms.put(currentReadingRoom);
-            } else {
-                await db.characters.put(currentChatCharacter);
-            }
+            // 按上下文统一落盘（阅读室/会话/旧模式）
+            await saveCurrentChatState();
 
             // 显示消息
             appendCharacterMessage(userMsg);
@@ -2921,7 +3932,10 @@ ${gridText}`;
                         ...innerVoiceData,
                         timestamp: Date.now()
                     });
-                    await db.characters.put(currentChatCharacter);
+                    await saveCurrentCharacterMetaFields({
+                        latestInnerVoice: currentChatCharacter.latestInnerVoice,
+                        innerVoiceHistory: currentChatCharacter.innerVoiceHistory
+                    });
                 }
 
                 // 逐条发送消息 (模拟真实聊天节奏)
@@ -2935,15 +3949,7 @@ ${gridText}`;
                     };
 
                     currentChatCharacter.chatHistory.push(aiMsg);
-
-                    // 根据模式保存到不同位置
-                    if (currentReadingRoom) {
-                        currentReadingRoom.chatHistory = currentChatCharacter.chatHistory;
-                        currentReadingRoom.lastActiveDate = Date.now();
-                        await db.readingRooms.put(currentReadingRoom);
-                    } else {
-                        await db.characters.put(currentChatCharacter);
-                    }
+                    await saveCurrentChatState();
 
                     appendCharacterMessage(aiMsg);
                     container.scrollTop = container.scrollHeight;
@@ -2959,7 +3965,7 @@ ${gridText}`;
                 if (currentChatCharacter.settings.autoSummary) {
                     const threshold = currentChatCharacter.settings.summaryInterval || 10;
                     if (currentChatCharacter.chatHistory.length % threshold === 0) {
-                        generateSummary(currentChatCharacter);
+                        generateSummaryForCurrentContext(currentChatCharacter);
                     }
                 }
 
@@ -3098,15 +4104,38 @@ ${gridText}`;
                 prompt += `\n`;
             }
 
-            // 2.6 长期记忆注入
-            // 注意：只挂载最近N条长期记忆，避免系统提示词过长
-            if (currentChatCharacter.longTermMemory && currentChatCharacter.longTermMemory.length > 0) {
-                const limit = currentChatCharacter.settings.pinnedMemory || 3;
-                const memories = currentChatCharacter.longTermMemory.slice(-limit);
-                console.log(`[系统提示词] 挂载 ${memories.length}/${currentChatCharacter.longTermMemory.length} 条长期记忆`);
+            // 2.6 长期记忆注入：先自有记忆，再挂载引用记忆
+            const ownMemories = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
+            const ownLimitRaw = Number(currentChatCharacter.settings.pinnedMemory);
+            const ownLimit = Number.isFinite(ownLimitRaw) ? Math.max(0, ownLimitRaw) : 3;
+            const ownMounted = ownLimit > 0 ? ownMemories.slice(-ownLimit) : [];
+
+            // 阅读室模式：额外注入角色本体的长期记忆（只读参考）
+            let characterBaseMemories = [];
+            if (currentReadingRoom && currentEditingCharacter) {
+                const charMem = Array.isArray(currentEditingCharacter.longTermMemory) ? currentEditingCharacter.longTermMemory : [];
+                characterBaseMemories = ownLimit > 0 ? charMem.slice(-ownLimit) : [];
+            }
+
+            const referencedMounted = currentCharacterSession
+                ? await getMountedReferenceMemories(currentCharacterSession)
+                : [];
+
+            if (ownMounted.length > 0 || referencedMounted.length > 0 || characterBaseMemories.length > 0) {
                 prompt += `# 长期记忆 (Long-term Memory)\n`;
-                prompt += `以下是你对我的重要记忆（最近${memories.length}条）：\n`;
-                memories.forEach(m => {
+                if (characterBaseMemories.length > 0) {
+                    prompt += `## 角色基础记忆（只读）\n`;
+                    characterBaseMemories.forEach(m => {
+                        prompt += `- ${m}\n`;
+                    });
+                }
+                if (ownMounted.length > 0) {
+                    if (currentReadingRoom) prompt += `## 阅读室记忆\n`;
+                    ownMounted.forEach(m => {
+                        prompt += `- ${m}\n`;
+                    });
+                }
+                referencedMounted.forEach(m => {
                     prompt += `- ${m}\n`;
                 });
                 prompt += `\n`;
@@ -7545,11 +8574,12 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
             showToast('正在准备导出数据...');
             // 导出完整数据：localStorage (store) + IndexedDB (角色、世界书、图书馆)
             const fullBackup = {
-                version: 3,
+                version: 4,
                 exportDate: new Date().toISOString(),
                 store: store,
                 // IndexedDB 数据 - AI 助手
                 characters: await db.characters.toArray(),
+                characterSessions: await db.characterSessions.toArray(),
                 worldBooks: await db.worldBooks.toArray(),
                 worldBookCategories: await db.worldBookCategories.toArray(),
                 // IndexedDB 数据 - 图书馆（不含书籍正文以减小体积）
@@ -7754,6 +8784,15 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                                 await db.characters.clear();
                                 if (d.characters.length > 0) await db.characters.bulkPut(d.characters);
                             }
+                            await db.characterSessions.clear();
+                            if (Array.isArray(d.characterSessions)) {
+                                const normalizedSessions = d.characterSessions
+                                    .map(normalizeCharacterSession)
+                                    .filter(Boolean);
+                                if (normalizedSessions.length > 0) {
+                                    await db.characterSessions.bulkPut(normalizedSessions);
+                                }
+                            }
                             if (Array.isArray(d.worldBooks)) {
                                 await db.worldBooks.clear();
                                 if (d.worldBooks.length > 0) await db.worldBooks.bulkPut(d.worldBooks);
@@ -7808,6 +8847,16 @@ ${weeklyData.taskTexts.slice(0, 5).join(', ') || '暂无'}
                                     const existing = await db.characters.get(char.id);
                                     if (!existing) {
                                         await db.characters.put(char);
+                                    }
+                                }
+                            }
+                            if (Array.isArray(d.characterSessions)) {
+                                for (const sessionRaw of d.characterSessions) {
+                                    const session = normalizeCharacterSession(sessionRaw);
+                                    if (!session) continue;
+                                    const existing = await db.characterSessions.get(session.id);
+                                    if (!existing) {
+                                        await db.characterSessions.put(session);
                                     }
                                 }
                             }
@@ -9560,43 +10609,45 @@ ${searchResultsText}
         }
 
         async function generateSummary(character) {
-            if(!character.settings.autoSummary) return;
-            if(!store.apiConfig.sub.url || !store.apiConfig.sub.key) {
+            // 兼容旧入口，统一走会话安全版本
+            return generateSummaryForCurrentContext(character);
+        }
+
+        async function generateSummaryForCurrentContext(character) {
+            const target = character || currentChatCharacter;
+            if (!target || !target.settings?.autoSummary) return;
+            if (!store.apiConfig.sub.url || !store.apiConfig.sub.key) {
                 console.warn('Auto Summary skipped: Sub API not configured');
                 return;
             }
 
-            const threshold = character.settings.summaryInterval || 10;
-            // Get recent context (last threshold messages)
-            const recentParams = character.chatHistory.slice(-threshold);
-            if(recentParams.length === 0) return;
-            
+            const threshold = target.settings.summaryInterval || 10;
+            const recentParams = Array.isArray(target.chatHistory) ? target.chatHistory.slice(-threshold) : [];
+            if (recentParams.length === 0) return;
+
             const contextText = recentParams.map(m => `${m.role}: ${m.content}`).join('\n');
             const nowStr = new Date().toLocaleString('zh-CN', { hour12: false });
-
             const summaryPrompt = `[ Memory Protocol ]
-【当前系统时间】: ${nowStr}
+【当前系统时间】 ${nowStr}
 
-你是当前角色的后台记忆整理程序。 你的任务是读取最近20条的【短期对话片段】，并将其总结为一段完整包含关键信息的【第一人称的长期记忆】。
+你是当前角色的后台记忆整理程序。请把最近对话整理成一条第一人称长期记忆。
 要求：
-1. **必须基于【当前系统时间】记录事件发生的准确时间点。**
-2. 第一人称视角： 必须以当前角色（如 "我"）的角度叙述。
-3. 提取关键信息： [日期|时间]用叙述的角度描述用户在这些时间里做了什么？我们的关系有什么进展？有什么待办事项？
-4. 情绪标记： 在括号内标记当前我感知到的用户情绪以及我的心声想法。
-5. 去水： 删除所有寒暄、废话。
-
-格式示例： “[2026/1/18 14:30] 塔拉今天很焦虑，向我抱怨了考研进度（焦虑等级: 高）。我帮她拆解了数学复习计划，她似乎平静了一些。我们需要在明晚检查她的完成情况。”
+1. 保留关键时间、事实、关系变化与待办事项。
+2. 删除寒暄与重复信息，输出单段文本。
+3. 保持第一人称视角，不要输出额外说明。
 
 【短期对话片段】：
 ${contextText}`;
 
+            const statusEl = document.getElementById('character-chat-status-bar');
             try {
-                const statusEl = document.getElementById('character-chat-status-bar');
-                if(statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '⚡ 正在整理长期记忆...'; }
+                if (statusEl) {
+                    statusEl.style.display = 'block';
+                    statusEl.textContent = '正在整理长期记忆...';
+                }
 
                 const config = store.apiConfig.sub;
                 const url = config.url.endsWith('/') ? config.url + 'chat/completions' : config.url + '/chat/completions';
-                
                 const res = await fetch(url, {
                     method: 'POST',
                     headers: {
@@ -9610,25 +10661,23 @@ ${contextText}`;
                     })
                 });
 
-                if(!res.ok) throw new Error('Sub API Error');
+                if (!res.ok) throw new Error('Sub API Error');
                 const data = await res.json();
-                const summary = data.choices?.[0]?.message?.content;
+                const summary = data.choices?.[0]?.message?.content?.trim();
+                if (!summary) return;
 
-                if(summary) {
-                    if(!character.longTermMemory) character.longTermMemory = [];
-                    // Add timestamp
-                    const entry = `[${new Date().toLocaleString()}] ${summary}`;
-                    character.longTermMemory.push(entry);
-                    // 只更新长期记忆，避免在阅读室模式下覆盖角色原始聊天记录
-                    await db.characters.update(character.id, { longTermMemory: character.longTermMemory });
-                    
-                    if(statusEl) { statusEl.textContent = '✅ 记忆已归档'; setTimeout(() => { statusEl.style.display = 'none'; }, 3000); }
+                const entry = `[${new Date().toLocaleString()}] ${summary}`;
+                if (!Array.isArray(currentChatCharacter.longTermMemory)) currentChatCharacter.longTermMemory = [];
+                currentChatCharacter.longTermMemory.push(entry);
+                await persistCurrentLongTermMemory();
+
+                if (statusEl) {
+                    statusEl.textContent = '记忆已归档';
+                    setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
                 }
-
-            } catch(e) {
+            } catch (e) {
                 console.error('Summary Generation Failed:', e);
-                const statusEl = document.getElementById('character-chat-status-bar');
-                if(statusEl) { statusEl.style.display = 'none'; }
+                if (statusEl) statusEl.style.display = 'none';
             }
         }
 
@@ -9672,12 +10721,7 @@ ${contextText}`;
                 const entry = `[${new Date().toLocaleString()}] ${text.trim()}`;
                 if(!currentChatCharacter.longTermMemory) currentChatCharacter.longTermMemory = [];
                 currentChatCharacter.longTermMemory.push(entry);
-                // 记忆属于角色本身，需要更新角色表（不覆盖聊天记录）
-                if (currentReadingRoom) {
-                    await db.characters.update(currentChatCharacter.id, { longTermMemory: currentChatCharacter.longTermMemory });
-                } else {
-                    await db.characters.put(currentChatCharacter);
-                }
+                await persistCurrentLongTermMemory();
                 openMemoryLibrary();
             }
         }
@@ -9698,11 +10742,7 @@ ${contextText}`;
 
             if(currentChatCharacter.longTermMemory[realIndex] !== finalString) {
                 currentChatCharacter.longTermMemory[realIndex] = finalString;
-                if (currentReadingRoom) {
-                    await db.characters.update(currentChatCharacter.id, { longTermMemory: currentChatCharacter.longTermMemory });
-                } else {
-                    await db.characters.put(currentChatCharacter);
-                }
+                await persistCurrentLongTermMemory();
                 console.log('Memory updated');
             }
         }
@@ -9711,11 +10751,7 @@ ${contextText}`;
             if(!currentChatCharacter) return;
             if(confirm('确定遗忘这段记忆吗？')) {
                 currentChatCharacter.longTermMemory.splice(realIndex, 1);
-                if (currentReadingRoom) {
-                    await db.characters.update(currentChatCharacter.id, { longTermMemory: currentChatCharacter.longTermMemory });
-                } else {
-                    await db.characters.put(currentChatCharacter);
-                }
+                await persistCurrentLongTermMemory();
                 openMemoryLibrary(); // Refresh
             }
         }
@@ -9906,6 +10942,7 @@ ${contextText}`;
 
                 // 1. 收集所有数据
                 const characters = await db.characters.toArray();
+                const characterSessions = (await db.characterSessions.toArray()).map(normalizeCharacterSession).filter(Boolean);
                 const worldBooks = await db.worldBooks.toArray();
                 const worldBookCategories = await db.worldBookCategories.toArray();
 
@@ -9927,6 +10964,7 @@ ${contextText}`;
                 const parts = {
                     core: storeCopy,
                     characters: characters.map(c => { const { avatar, ...rest } = c; return rest; }),
+                    sessions: characterSessions,
                     avatars: {
                         userAvatar: store.userAvatar || null,
                         characterAvatars: characters.filter(c => c.avatar).map(c => ({ id: c.id, avatar: c.avatar }))
@@ -9958,7 +10996,7 @@ ${contextText}`;
 
                 // 4. 构建 manifest
                 const manifest = {
-                    version: 3,
+                    version: 4,
                     exportDate: new Date().toISOString(),
                     parts: manifestParts,
                     totalSizeKB: totalSizeKB
@@ -10101,6 +11139,17 @@ ${contextText}`;
                         await db.characters.bulkPut(fullCharacters);
                     }
 
+                    // sessions → 角色多窗口会话
+                    await db.characterSessions.clear();
+                    if (Array.isArray(downloadedParts.sessions)) {
+                        const sessionsToRestore = downloadedParts.sessions
+                            .map(normalizeCharacterSession)
+                            .filter(Boolean);
+                        if (sessionsToRestore.length > 0) {
+                            await db.characterSessions.bulkPut(sessionsToRestore);
+                        }
+                    }
+
                     // worldbooks
                     if (downloadedParts.worldbooks) {
                         if (downloadedParts.worldbooks.worldBooks && downloadedParts.worldbooks.worldBooks.length > 0) {
@@ -10209,6 +11258,15 @@ ${contextText}`;
                         if (backupData.characters && backupData.characters.length > 0) {
                             await db.characters.clear();
                             await db.characters.bulkPut(backupData.characters);
+                        }
+                        await db.characterSessions.clear();
+                        if (Array.isArray(backupData.characterSessions) && backupData.characterSessions.length > 0) {
+                            const sessionsToRestore = backupData.characterSessions
+                                .map(normalizeCharacterSession)
+                                .filter(Boolean);
+                            if (sessionsToRestore.length > 0) {
+                                await db.characterSessions.bulkPut(sessionsToRestore);
+                            }
                         }
                         if (backupData.worldBooks && backupData.worldBooks.length > 0) {
                             await db.worldBooks.clear();
@@ -10330,7 +11388,6 @@ ${contextText}`;
             if (isBackgroundChecking) return;
             if (!store.bgActivitySettings?.enabled) return;
 
-            // Requirement 3: 检查所有角色的后台活动
             isBackgroundChecking = true;
             try {
                 const characters = await db.characters.toArray();
@@ -10343,20 +11400,25 @@ ${contextText}`;
                     // 冷却时间 (分钟 -> 毫秒)
                     const cooldownMs = (char.settings.bgCooldown || 120) * 60 * 1000;
 
-                    // 获取最后一条消息的时间
-                    let lastMsgTime = 0;
-                    if (char.chatHistory && char.chatHistory.length > 0) {
-                        lastMsgTime = char.chatHistory[char.chatHistory.length - 1].timestamp || 0;
-                    } else {
-                        lastMsgTime = char.createdAt || 0;
+                    // 优先选择该角色置顶窗口；若无置顶，则选择最近活跃窗口
+                    let targetSession = null;
+                    let historyForCooldown = Array.isArray(char.chatHistory) ? char.chatHistory : [];
+                    let lastBgTriggerTime = Number(char.lastBgTriggerTime) || 0;
+                    let baseCreatedAt = Number(char.createdAt) || 0;
+                    if (isCharacterSessionModeEnabled(char)) {
+                        targetSession = await resolveBackgroundSessionTarget(char.id);
+                        if (targetSession) {
+                            historyForCooldown = Array.isArray(targetSession.chatHistory) ? targetSession.chatHistory : [];
+                            lastBgTriggerTime = Number(targetSession.lastBgTriggerTime) || 0;
+                            baseCreatedAt = Number(targetSession.createdAt) || baseCreatedAt;
+                        }
                     }
 
-                    // 使用最近活动时间（聊天或后台触发）进行冷却判断
-                    const lastBgTriggerTime = Number(char.lastBgTriggerTime) || 0;
+                    const lastMsgTime = Math.max(getLatestMessageTimestamp(historyForCooldown), baseCreatedAt);
                     const lastActivity = Math.max(lastMsgTime, lastBgTriggerTime);
                     if (now - lastActivity < cooldownMs) continue;
 
-                    const triggered = await triggerBackgroundEvent(char);
+                    const triggered = await triggerBackgroundEvent(char, targetSession);
                     if (triggered) {
                         triggeredCount++;
                         // 单次检查最多触发2个角色，避免集中打扰
@@ -10368,8 +11430,10 @@ ${contextText}`;
             }
         }
 
-        async function triggerBackgroundEvent(char) {
-            console.log(`[Vesper] Triggering background event for ${char.name}`);
+        async function triggerBackgroundEvent(char, targetSession = null) {
+            const targetName = targetSession?.name || DEFAULT_CHARACTER_SESSION_NAME;
+            const targetLabel = targetSession ? `${char.name}/${targetName}` : char.name;
+            console.log(`[Vesper] Triggering background event for ${targetLabel}`);
             
             // 构造一个特殊的系统提示, 让 AI 发起话题
             const systemPrompt = `[System Command]: You are currently in "Background Active Mode". The user hasn't spoken to you for a while. 
@@ -10384,8 +11448,11 @@ Keep it short and natural. Don't mention you are an AI.`;
             try {
                 // 构建简化的 prompt
                 let history = [];
-                if (char.chatHistory) {
-                    history = char.chatHistory.slice(-5).map(m => {
+                const sourceHistory = targetSession
+                    ? (Array.isArray(targetSession.chatHistory) ? targetSession.chatHistory : [])
+                    : (Array.isArray(char.chatHistory) ? char.chatHistory : []);
+                if (sourceHistory.length > 0) {
+                    history = sourceHistory.slice(-5).map(m => {
                         // [时间戳注入] 在每条消息前添加时间戳信息
                         const msgTime = m.timestamp ? new Date(m.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未知时间';
                         const timePrefix = `[消息时间: ${msgTime}]\n`;
@@ -10421,27 +11488,57 @@ Keep it short and natural. Don't mention you are an AI.`;
                 const content = data.choices?.[0]?.message?.content;
 
                 if (content) {
+                    const now = Date.now();
                     const newMsg = {
                         role: 'assistant',
                         content: content,
-                        timestamp: Date.now()
+                        timestamp: now
                     };
-                    if (!Array.isArray(char.chatHistory)) {
-                        char.chatHistory = [];
-                    }
-                    char.chatHistory.push(newMsg);
-                    char.lastBgTriggerTime = newMsg.timestamp;
-                    await db.characters.put(char);
-                    
-                    // 如果当前正在聊这个角色, 更新 UI
-                    if (currentChatCharacter && currentChatCharacter.id === char.id) {
-                        appendCharacterMessage(newMsg);
-                        const container = document.getElementById('character-chat-messages');
-                        container.scrollTop = container.scrollHeight;
+
+                    if (targetSession) {
+                        if (!Array.isArray(targetSession.chatHistory)) targetSession.chatHistory = [];
+                        targetSession.chatHistory.push(newMsg);
+                        targetSession.lastBgTriggerTime = now;
+                        targetSession.updatedAt = now;
+                        targetSession.lastActiveAt = now;
+                        await db.characterSessions.put(normalizeCharacterSession(targetSession));
+                        await db.characters.update(char.id, { lastBgTriggerTime: now });
                     } else {
-                        // 否则显示红点或提示 (这里简单弹个 toast)
-                        showToast(`💬 ${char.name} 发来一条新消息`);
-                        renderCharacterList(); // 更新列表预览
+                        if (!Array.isArray(char.chatHistory)) char.chatHistory = [];
+                        char.chatHistory.push(newMsg);
+                        char.lastBgTriggerTime = now;
+                        await db.characters.put(char);
+                    }
+
+                    // 如果当前正在聊这个角色且命中了同一个写入目标，直接追加到当前聊天视图
+                    const isCurrentCharacterOpen = !!currentChatCharacter && !!currentEditingCharacter && currentEditingCharacter.id === char.id;
+                    const isCurrentSessionTarget = !!targetSession && !!currentCharacterSession && currentCharacterSession.id === targetSession.id;
+                    const isCurrentLegacyTarget = !targetSession && isCurrentCharacterOpen && !currentCharacterSession && !currentReadingRoom;
+                    if (isCurrentCharacterOpen && (isCurrentSessionTarget || isCurrentLegacyTarget)) {
+                        if (!Array.isArray(currentChatCharacter.chatHistory)) currentChatCharacter.chatHistory = [];
+                        const currentHistory = currentChatCharacter.chatHistory;
+                        const latest = currentHistory[currentHistory.length - 1];
+                        if (!latest || latest.timestamp !== newMsg.timestamp || latest.content !== newMsg.content) {
+                            currentHistory.push(newMsg);
+                        }
+                        if (isCurrentSessionTarget && currentCharacterSession) {
+                            currentCharacterSession.lastBgTriggerTime = now;
+                            currentCharacterSession.updatedAt = now;
+                            currentCharacterSession.lastActiveAt = now;
+                        }
+                        appendCharacterMessage(newMsg, currentHistory.length - 1);
+                        updateChatMessageCounter(currentHistory.filter(msg => !msg.hidden).length);
+                        const container = document.getElementById('character-chat-messages');
+                        if (container) container.scrollTop = container.scrollHeight;
+                    } else {
+                        const toastName = targetSession ? `${char.name} · ${targetName}` : char.name;
+                        showToast(`💬 ${toastName} 发来一条新消息`);
+                    }
+
+                    // 更新角色/会话列表预览
+                    await renderCharacterList();
+                    if (typeof renderCharacterSessionSidebar === 'function') {
+                        await renderCharacterSessionSidebar();
                     }
                     return true;
                 }
@@ -10651,9 +11748,10 @@ ${taskList}
             // 关闭弹窗
             closeModal('modal-select-character');
 
-            // 设置当前聊天角色
+            // 进入该角色聊天（自动按迁移模式选择 legacy/session）
             currentEditingCharacter = targetChar;
-            currentChatCharacter = targetChar;
+            await openCharacterChat();
+            if (!currentChatCharacter) return;
 
             // 创建消息
             const userMsg = {
@@ -10669,13 +11767,7 @@ ${taskList}
             currentChatCharacter.chatHistory.push(userMsg);
             await saveCurrentChatState();
 
-            // 打开聊天界面
-            resetUI();
-            document.body.classList.add('no-scroll');
-            document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
-            document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
             renderCharacterChatHistory();
-            document.getElementById('character-chat-screen').style.display = 'flex';
 
             // 滚动到底部
             setTimeout(() => {
@@ -14170,6 +15262,11 @@ ${taskList}
                     return;
                 }
 
+                // 阅读室模式与角色会话模式互斥，避免上下文串线
+                currentCharacterSession = null;
+                if (typeof closeCharacterSessionSidebar === 'function') closeCharacterSessionSidebar();
+                if (typeof hideCharacterSessionContextMenu === 'function') hideCharacterSessionContextMenu();
+
                 // 初始化聊天历史
                 if (!room.chatHistory) room.chatHistory = [];
 
@@ -14211,11 +15308,14 @@ ${taskList}
                 console.log('[阅读室] openedFromReader:', currentReadingRoom.openedFromReader,
                     'reader-screen display:', document.getElementById('reader-screen')?.style.display);
                 updateReadingSpoilerToggle();
+                const sessionBtn = document.getElementById('chat-session-btn');
+                if (sessionBtn) sessionBtn.style.display = 'none';
 
-                // 创建角色的工作副本，使用阅读室的聊天历史
+                // 创建角色的工作副本，使用阅读室的聊天历史和阅读室自己的长期记忆
                 currentChatCharacter = {
                     ...character,
-                    chatHistory: room.chatHistory
+                    chatHistory: room.chatHistory,
+                    longTermMemory: Array.isArray(room.longTermMemory) ? room.longTermMemory : []
                 };
 
                 // 设置聊天界面
@@ -14906,3 +16006,4 @@ ${taskList}
         _emojiObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
         console.log('[LifeOS] Emoji→SVG 图标系统已加载');
+
