@@ -1921,6 +1921,16 @@
         #character-chat-messages {
             padding-bottom: 130px !important;
             /* 留出输入框的空间 (含工具栏) */
+            will-change: scroll-position;
+        }
+
+        /* [性能优化] GPU 加速提示 */
+        #nav-transition-overlay {
+            will-change: opacity;
+        }
+
+        .modal {
+            will-change: transform, opacity;
         }
 
         /* --- [Vesper] 战术工具栏样式 --- */
@@ -4708,6 +4718,38 @@
             font-weight: 700;
         }
 
+        /* --- 文件卡片 --- */
+        .sc-file-info {
+            padding: 10px 12px;
+        }
+
+        .sc-file-name {
+            font-size: 0.85rem;
+            font-weight: 700;
+            word-break: break-all;
+            line-height: 1.3;
+        }
+
+        .sc-file-meta {
+            font-size: 0.65rem;
+            opacity: 0.5;
+            margin-top: 4px;
+            font-family: 'Space Grotesk', 'JetBrains Mono', monospace;
+            letter-spacing: 0.5px;
+        }
+
+        .sc-file-preview {
+            padding: 6px 12px 10px;
+            font-size: 0.7rem;
+            line-height: 1.5;
+            opacity: 0.6;
+            max-height: 80px;
+            overflow: hidden;
+            border-top: 1px dashed rgba(10, 34, 245, 0.1);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
         /* AI回复按钮主题适配 */
         [data-theme="construct"] #character-ai-reply-btn {
             border-radius: 50% !important;
@@ -4720,3 +4762,85 @@
             color: #fff !important;
             box-shadow: 2px 2px 0 rgba(10, 34, 245, 0.3);
         }
+
+        /* ===== Task Center (Phase 5.6-C) ===== */
+        .task-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .task-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .task-card-name {
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .task-card-meta {
+            font-size: 0.7rem;
+            opacity: 0.6;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .task-status-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 500;
+        }
+        .task-status-tag.created { background: rgba(158,158,158,0.2); color: #9e9e9e; }
+        .task-status-tag.scheduled { background: rgba(33,150,243,0.15); color: #2196f3; }
+        .task-status-tag.running { background: rgba(255,152,0,0.15); color: #ff9800; }
+        .task-status-tag.delivered { background: rgba(76,175,80,0.15); color: #4caf50; }
+        .task-status-tag.archived { background: rgba(158,158,158,0.15); color: #9e9e9e; }
+        .task-card-actions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .task-card-actions button {
+            padding: 4px 10px;
+            font-size: 0.7rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            color: var(--text);
+            cursor: pointer;
+        }
+        .task-card-actions button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .task-card-actions button.danger:hover { background: #c62828; border-color: #c62828; }
+        .task-card.disabled { opacity: 0.5; }
+        .task-filter-btn.active {
+            background: var(--accent) !important;
+            color: #fff !important;
+            border-color: var(--accent) !important;
+        }
+
+        /* ===== Link Preview Card ===== */
+        .sc-link { transition: box-shadow 0.2s; }
+        .sc-link:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+        .sc-link-img { margin: 8px 0; border-radius: 8px; overflow: hidden; max-height: 160px; }
+        .sc-link-img img { width: 100%; height: auto; display: block; object-fit: cover; max-height: 160px; }
+        .sc-link-body { padding: 4px 0; }
+        .sc-link-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; }
+        .sc-link-desc { font-size: 0.75rem; opacity: 0.7; line-height: 1.4; }
+        .sc-link-actions { display: flex; gap: 6px; margin-top: 8px; }
+        .sc-link-actions button {
+            padding: 4px 10px; font-size: 0.7rem; border-radius: 8px;
+            border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer;
+        }
+        .sc-link-actions button:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+        /* ===== Location Card ===== */
+        .sc-loc-body { padding: 6px 0; }
+        .sc-loc-name { font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; }
+        .sc-loc-addr { font-size: 0.75rem; opacity: 0.6; margin-bottom: 4px; }
+        .sc-loc-weather { font-size: 0.75rem; opacity: 0.7; padding: 4px 8px; background: rgba(var(--accent-rgb),0.08); border-radius: 6px; display: inline-block; }

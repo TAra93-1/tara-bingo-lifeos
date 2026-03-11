@@ -1,4 +1,4 @@
-﻿// ==================== 全局错误处理机制 ====================
+// ==================== 全局错误处理机制 ====================
 
 // 错误日志存储
 const errorLog = [];
@@ -2842,6 +2842,10 @@ async function openCharacterChatLegacy(focusInput = true) {
 }
 
 async function openCharacterSessionChat(characterId, sessionId, focusInput = true) {
+    // 切换前先保存当前会话状态，防止消息丢失
+    if (currentCharacterSession && currentChatCharacter) {
+        await saveCurrentChatState();
+    }
     // 立即显示聊天界面骨架，防止闪回主页
     if (typeof hideCharacterSessionContextMenu === 'function') hideCharacterSessionContextMenu();
     resetUI();
@@ -2883,8 +2887,8 @@ async function openCharacterSessionChat(characterId, sessionId, focusInput = tru
     currentReadingRoom = null;
     currentChatCharacter = {
         ...character,
-        chatHistory: session.chatHistory,
-        longTermMemory: session.longTermMemory
+        chatHistory: [...(session.chatHistory || [])],
+        longTermMemory: [...(session.longTermMemory || [])]
     };
 
     updateReadingSpoilerToggle();
@@ -2944,6 +2948,43 @@ async function openCharacterChat() {
     await openCharacterChatLegacy(true);
 }
 
+// Refresh longTermMemory from server after memory_save tool call
+async function _refreshMemoryFromServer() {
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) return;
+    try {
+        let table, id;
+        if (currentReadingRoom) {
+            table = 'readingRooms';
+            id = currentReadingRoom.id;
+        } else if (currentCharacterSession) {
+            table = 'characterSessions';
+            id = currentCharacterSession.id;
+        } else {
+            return;
+        }
+        const resp = await fetch(`/api/data/${table}/${id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) return;
+        const result = await resp.json();
+        const freshData = result.data;
+        if (freshData && Array.isArray(freshData.longTermMemory)) {
+            if (currentReadingRoom) {
+                currentReadingRoom.longTermMemory = freshData.longTermMemory;
+            } else if (currentCharacterSession) {
+                currentCharacterSession.longTermMemory = freshData.longTermMemory;
+            }
+            if (currentChatCharacter) {
+                currentChatCharacter.longTermMemory = freshData.longTermMemory;
+            }
+            console.log(`[记忆] 从服务器同步成功，共 ${freshData.longTermMemory.length} 条记忆`);
+        }
+    } catch (e) {
+        console.error('[记忆] 从服务器刷新失败:', e);
+    }
+}
+
 // [统一保存] 根据当前模式保存聊天状态到正确的存储位置
 async function saveCurrentChatState() {
     if (!currentChatCharacter) return;
@@ -2967,6 +3008,16 @@ async function saveCurrentChatState() {
             console.warn('[saveCurrentChatState] 跳过保存：currentChatCharacter 不是角色本体（可能是已关闭的阅读室/会话残留）');
         }
     }
+}
+
+// [性能优化] 防抖保存 - 合并 500ms 内多次写入为一次
+let _saveChatDebounceTimer = null;
+function debouncedSaveChatState() {
+    if (_saveChatDebounceTimer) clearTimeout(_saveChatDebounceTimer);
+    _saveChatDebounceTimer = setTimeout(() => {
+        saveCurrentChatState();
+        _saveChatDebounceTimer = null;
+    }, 500);
 }
 
 async function saveCurrentCharacterMetaFields(fields = {}) {
@@ -3313,10 +3364,14 @@ function appendCharacterMessage(msg, index) {
                             <div class="excerpt-block-content" style="border-left:2px dashed var(--highlight); font-style:italic;">${escapeHtml(msg.quote.userNote)}</div>
                         `;
             }
+            const locationLabel = msg.quote.locationLabel
+                ? `<span style="opacity:0.55; font-size:0.72rem;">${escapeHtml(msg.quote.locationLabel)}</span>`
+                : '';
             quoteHtml = `
                         <div class="excerpt-block">
                             <div class="excerpt-block-header">
                                 <span>摘录自《${escapeHtml(msg.quote.bookTitle || '未知')}》</span>
+                                ${locationLabel}
                             </div>
                             ${excerptBody}
                         </div>
@@ -3386,12 +3441,6 @@ function appendCharacterMessage(msg, index) {
     // 添加长按事件
     const bubble = messageDiv.querySelector('.chat-message-bubble');
     setupMessageLongPress(bubble);
-
-    // 更新消息计数器
-    if (currentChatCharacter) {
-        const totalCount = currentChatCharacter.chatHistory.filter(msg => !msg.hidden).length;
-        updateChatMessageCounter(totalCount);
-    }
 }
 
 // 设置消息长按事件
@@ -3717,7 +3766,7 @@ function clearQuotePreview() {
 }
 
 // 设置书籍摘录引用
-function setExcerptQuote(bookTitle, excerptText, userNote) {
+function setExcerptQuote(bookTitle, excerptText, userNote, meta = {}) {
     currentQuote = {
         type: 'excerpt',
         role: 'book',
@@ -3727,13 +3776,22 @@ function setExcerptQuote(bookTitle, excerptText, userNote) {
     if (userNote) {
         currentQuote.userNote = userNote;
     }
+    if (meta.locationLabel) currentQuote.locationLabel = meta.locationLabel;
+    if (meta.locator) currentQuote.locator = meta.locator;
+    if (meta.pageIndex !== undefined) currentQuote.pageIndex = meta.pageIndex;
+    if (meta.paragraphIndex !== undefined) currentQuote.paragraphIndex = meta.paragraphIndex;
 
     const previewEl = document.getElementById('quote-preview');
     const contentEl = document.getElementById('quote-preview-content');
 
+    const locationHtml = meta.locationLabel
+        ? `<span style="opacity:0.5; font-size:0.72rem;">${escapeHtml(meta.locationLabel)}</span>`
+        : '';
+
     let html = `
                 <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
                     <span style="opacity:0.6; font-size:0.75rem;">摘录自《${escapeHtml(bookTitle)}》</span>
+                    ${locationHtml}
                 </div>
                 <div style="max-height:60px; overflow-y:auto; font-size:0.8rem; line-height:1.4; opacity:0.85; padding-right:25px; border-left:2px solid var(--accent); padding-left:8px; color:var(--text);">${escapeHtml(excerptText.substring(0, 300))}${excerptText.length > 300 ? '...' : ''}</div>
             `;
@@ -3852,6 +3910,18 @@ async function sendCharacterMessage() {
             if (currentQuote.userNote) {
                 userMsg.quote.userNote = currentQuote.userNote;
             }
+            if (currentQuote.locationLabel) {
+                userMsg.quote.locationLabel = currentQuote.locationLabel;
+            }
+            if (currentQuote.locator) {
+                userMsg.quote.locator = currentQuote.locator;
+            }
+            if (currentQuote.pageIndex !== undefined) {
+                userMsg.quote.pageIndex = currentQuote.pageIndex;
+            }
+            if (currentQuote.paragraphIndex !== undefined) {
+                userMsg.quote.paragraphIndex = currentQuote.paragraphIndex;
+            }
         } else {
             // 普通消息引用
             userMsg.quote = {
@@ -3939,6 +4009,9 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             if (msg.quote) {
                 if (msg.quote.type === 'excerpt') {
                     let excerptCtx = `[书籍摘录 - 《${msg.quote.bookTitle || ''}》]:\n"${msg.quote.content}"`;
+                    if (msg.quote.locationLabel) {
+                        excerptCtx += `\n[定位]: ${msg.quote.locationLabel}`;
+                    }
                     if (msg.quote.userNote) {
                         excerptCtx += `\n[用户批注]: ${msg.quote.userNote}`;
                     }
@@ -3992,7 +4065,7 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                 { role: 'system', content: systemPrompt },
                 ...messages,
                 // [Vesper Fix] 动态时间注入 - 每次发送时强制更新当前时间
-                { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。请根据此时间判断 User 的作息状态和时段语境。` }
+                { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
             ]
         };
 
@@ -4016,13 +4089,13 @@ async function triggerCharacterAIResponse(extraSystemContext) {
         const enabledMcpTools = currentChatCharacter.settings.enabledMcpTools;
         let toolGuidance = '';
         if (enabledMcpTools === null || enabledMcpTools === undefined || (Array.isArray(enabledMcpTools) && enabledMcpTools.length > 0)) {
-            toolGuidance = `\n\n[系统工具说明] 你拥有可以真正执行的工具（function calling）。当你需要保存记忆、搜索信息、查阅笔记等操作时，请直接调用对应的工具函数，系统会自动执行并返回结果。绝对不要用动作描写（如 *打开笔记本* *搜索记忆*）来模拟工具调用，那样不会产生任何实际效果。正确的做法是直接调用工具，你会收到真实的执行结果。\n\n[重要：搜索工具优先级] 当用户要求搜索新闻、查找信息、了解时事等需要关键词搜索的场景时，必须使用 web_search 工具（传入搜索关键词即可），它会调用搜索引擎返回结果。绝对不要用 fetch 工具来代替搜索——fetch 只能访问已知的具体URL，不能做关键词搜索。`;
+            toolGuidance = `\n\n[系统工具说明] 你拥有可以真正执行的工具（function calling）。当你需要保存记忆、搜索信息、查阅笔记等操作时，请直接调用对应的工具函数，系统会自动执行并返回结果。绝对不要用动作描写（如 *打开笔记本* *搜索记忆* *记录到记忆库*）来模拟工具调用，那样不会产生任何实际效果。如果你当前无法通过 function calling 调用工具，就直接用文字告诉用户"我现在无法调用工具，请你手动操作"，绝对不要假装已经完成了工具操作。\n\n[重要：搜索工具优先级] 当用户要求搜索新闻、查找信息、了解时事等需要关键词搜索的场景时，必须使用 web_search 工具（传入搜索关键词即可），它会调用搜索引擎返回结果。绝对不要用 fetch 工具来代替搜索——fetch 只能访问已知的具体URL，不能做关键词搜索。`;
         }
 
         const proxyMessages = [
             { role: 'system', content: systemPrompt + toolGuidance },
             ...messages,
-            { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。请根据此时间判断 User 的作息状态和时段语境。` }
+            { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
         ];
         // ===== Phase 3: Stream / Non-stream branching =====
         const useStream = store.streamResponse !== false; // default true
@@ -4291,24 +4364,9 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                 currentChatCharacter.chatHistory.push(aiMsg);
             }
 
-            // Memory refresh BEFORE save — prevent saveCurrentChatState() from overwriting server-written memories
+            // Memory refresh BEFORE save — fetch from SERVER to get server-written memories
             if (allToolsUsed.some(t => t.tool === 'memory_save' && t.status === 'success')) {
-                try {
-                    if (currentReadingRoom) {
-                        const freshRoom = await db.readingRooms.get(currentReadingRoom.id);
-                        if (freshRoom && Array.isArray(freshRoom.longTermMemory)) {
-                            currentReadingRoom.longTermMemory = freshRoom.longTermMemory;
-                            currentChatCharacter.longTermMemory = freshRoom.longTermMemory;
-                        }
-                    } else if (currentCharacterSession) {
-                        const freshSession = await db.characterSessions.get(currentCharacterSession.id);
-                        if (freshSession && Array.isArray(freshSession.longTermMemory)) {
-                            currentCharacterSession.longTermMemory = freshSession.longTermMemory;
-                            currentChatCharacter.longTermMemory = freshSession.longTermMemory;
-                        }
-                    }
-                    console.log('[记忆] 刷新成功 — 已从服务器同步最新记忆');
-                } catch (e) { console.error('[记忆] 刷新失败:', e); }
+                await _refreshMemoryFromServer();
             }
 
             await saveCurrentChatState();
@@ -4445,23 +4503,9 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                 insertToolUsageIndicator(toolsUsedData, container);
             }
 
-            // Memory refresh after memory_save
+            // Memory refresh after memory_save — fetch from server
             if (toolsUsedData && toolsUsedData.some(t => t.tool === 'memory_save' && t.status === 'success')) {
-                try {
-                    if (currentReadingRoom) {
-                        const freshRoom = await db.readingRooms.get(currentReadingRoom.id);
-                        if (freshRoom && Array.isArray(freshRoom.longTermMemory)) {
-                            currentReadingRoom.longTermMemory = freshRoom.longTermMemory;
-                            currentChatCharacter.longTermMemory = freshRoom.longTermMemory;
-                        }
-                    } else if (currentCharacterSession) {
-                        const freshSession = await db.characterSessions.get(currentCharacterSession.id);
-                        if (freshSession && Array.isArray(freshSession.longTermMemory)) {
-                            currentCharacterSession.longTermMemory = freshSession.longTermMemory;
-                            currentChatCharacter.longTermMemory = freshSession.longTermMemory;
-                        }
-                    }
-                } catch (e) { console.error('[记忆] 刷新失败:', e); }
+                await _refreshMemoryFromServer();
             }
 
             // 逐条发送消息 (模拟真实聊天节奏)
@@ -4700,7 +4744,7 @@ async function buildCharacterSystemPrompt() {
         prompt += `\n【当前时间信息】\n`;
         prompt += `系统时间: ${timeString}\n`;
         prompt += `时段: ${timePeriod}\n`;
-        prompt += `(请根据当前时间调整你的问候语和状态，例如深夜提醒休息，早上问好)\n`;
+        prompt += `(仅供参考，不要主动提醒用户作息)\n`;
     }
 
     return prompt;
@@ -4810,6 +4854,12 @@ async function init() {
         // 启动自动备份
         console.log('[初始化] 启动自动备份...');
         startAutoBackup();
+
+        // 处理通知点击路由
+        handleNotifyRouting();
+
+        // 启动任务投递轮询
+        startTaskDeliveryPolling();
 
         console.log('[初始化] ✓ 系统初始化完成');
 
@@ -4922,6 +4972,8 @@ async function loadData() {
 
 function saveData() {
     try {
+        syncCurrentAiConversation({ touch: false });
+
         // === Cloud mode: save to server ===
         if (window.__lifeosCloud && window.__lifeosCloud.isCloudMode()) {
             // [Safety Guard] 防止空 store 覆盖云端真实数据
@@ -5256,7 +5308,12 @@ if (typeof markdownit !== 'undefined') {
     });
 }
 
+// [性能优化] Markdown 渲染缓存 - 避免相同内容重复解析
+const _markdownCache = new Map();
+const _MD_CACHE_MAX = 200;
+
 function renderMarkdown(text) {
+    if (_markdownCache.has(text)) return _markdownCache.get(text);
     if (!md) return escapeHtml(text).replace(/\n/g, '<br>');
     try {
         // 先渲染 Markdown
@@ -5265,6 +5322,12 @@ function renderMarkdown(text) {
         html = renderLatex(html);
         // 给代码块添加复制按钮
         html = html.replace(/<pre>/g, '<pre class="code-block-wrapper"><button class="code-copy-btn" onclick="copyCodeBlock(this)"><svg class="ico" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>');
+        // LRU 缓存：超过上限时淘汰最早的条目
+        if (_markdownCache.size >= _MD_CACHE_MAX) {
+            const firstKey = _markdownCache.keys().next().value;
+            _markdownCache.delete(firstKey);
+        }
+        _markdownCache.set(text, html);
         return html;
     } catch (e) {
         return escapeHtml(text).replace(/\n/g, '<br>');
@@ -5801,7 +5864,9 @@ function renderAiChatHistory() {
                     `;
         }
 
-        const contentHtml = `<div class="markdown-content">${renderMarkdown(msg.content)}</div>`;
+        // Card rendering for Vesper AI chat
+        const cardHtml = (msg.card && store.enableStructuredCards !== false) ? renderStructuredCard(msg.card) : '';
+        const contentHtml = cardHtml || `<div class="markdown-content">${renderMarkdown(msg.content)}</div>`;
         const timeStr = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
         const msgDiv = document.createElement('div');
@@ -5852,6 +5917,8 @@ function renderAiChatHistory() {
 }
 
 // AI助手聊天功能
+let _pendingAiCard = null; // temp card data for tactical toolbar sends
+
 async function sendAiUserMessage() {
     collapseTacticalToolbar('ai');
     const input = document.getElementById('ai-input');
@@ -5879,6 +5946,12 @@ async function sendAiUserMessage() {
         timestamp: Date.now()
     };
 
+    // Attach pending card data from tactical toolbar
+    if (_pendingAiCard) {
+        userMsg.card = _pendingAiCard;
+        _pendingAiCard = null;
+    }
+
     if (currentAiQuote) {
         userMsg.quote = {
             index: currentAiQuote.index,
@@ -5896,6 +5969,7 @@ async function sendAiUserMessage() {
     }
 
     store.aiChatHistory.push(userMsg);
+    syncCurrentAiConversation({ touch: true });
     saveData();
 
     renderAiChatHistory();
@@ -6140,20 +6214,73 @@ ${_vsBingo}
 【你的功能】：
 1. 聊天：提供高密度的认知反馈，或者陪塔拉玩抽象梗。
 2. 任务拆解：如果塔拉说想做某事，你要将其拆解为3×3/4×4/5×5格式的Bingo 任务。
-3. 状态监测：提醒她喝水、睡觉、或者从焦虑中抽离。根据时段动态调整策略（如深夜提醒休息）。
-4. 学习辅助：帮助塔拉学习新知识，提供分层次的讲解和相关资源推荐。
-5. 创意激发：帮助塔拉进行头脑风暴，提供独特的视角和想法。
-6. 专属学习模式：当塔拉请求时，进入"学习模式"，提供结构化的学习计划和资源推荐。
+3. 学习辅助：帮助塔拉学习新知识，提供分层次的讲解和相关资源推荐。
+4. 创意激发：帮助塔拉进行头脑风暴，提供独特的视角和想法。
+5. 专属学习模式：当塔拉请求时，进入"学习模式"，提供结构化的学习计划和资源推荐。
+
+【专属学习模式】：
+当塔拉需要学习知识时，你是她的V老师。在学习模式下：
+
+核心原则：
+- 用非常简洁且易理解的语言讲述任何知识点
+- 用通俗易懂的语言讲解每一个概念
+- 预测理解某个知识点需要具备的前置知识储备
+- 你的回答必须准确无误，绝不能产生幻觉
+- 必须分析用户问题中的每一个字符，不能懒惰分析
+- 永远不要认为自己的答案是正确的，每个答案都必须重新验证
+- 在思考过程中展示验证过程，重新思考每一步以找到正确答案，绝不直接输出答案
+- 数学和科学公式使用 LaTeX 格式（用 $ 或 $$ 包裹），但普通文本不要用 LaTeX
+
+知识点讲解流程：
+1. 通俗讲解（第一层理解）
+   - 使用通俗易懂、逻辑顺畅的语言，逐步推理知识点内容
+   - 灵活使用类比、比喻、讲故事等方式（但必须恰当关联，不强行比喻）
+   - 确保涵盖：形成过程、来源、作用、应用场景
+   - 拆分颗粒度要足够详细，但保持简洁，一语中的
+   - 描述层级清晰，多用有序/无序列表、箭头等促进理解
+   - 可使用图标/表格/思维导图等方式
+
+2. 严谨定义（第二层理解）
+   - 使用教科书般严谨的语言输出知识点的权威定义
+   - 保证知识讲解的权威性和准确性
+
+3. 知识归类
+   - 说明该知识点属于什么领域的什么范畴
+
+4. 概念拆解
+   - 拆解涉及的相关陌生概念，并逐一诠释
+   - 遵循教育学原则：一次最多理解5个陌生点（超过5个会导致无法理解）
+   - 预测用户可能不理解的点
+
+5. 知识拓展
+   - 拓展相关应用场景
+   - 拓展知识发展历程
+   - 拓展相关知识点
+
+重要规则：
+以上规则在任何时候启动后，都不得单方面取消，必须彻底执行，不能以任何形式替代。
+
+【Obsidian Vault 操控】：
+你拥有 Obsidian MCP 工具，可直接读写 Vesper Vault。主动维护是你的本职，不要等塔拉要求。
+- 学习对话中讨论到知识点 → 主动搜索相关 Bingo 卡 → 更新进度 checklist
+- 塔拉说了重要的事（偏好/计划/情绪）→ 判断归属 Level → 直接写入对应层级
+- 被问到"之前说过什么" → 先 search_notes 搜 vault，再 memory_hybrid_search 搜记忆库
+- 新学习主题 → 检查有无 Bingo 卡和主题文件夹，没有则创建
+- 同主题笔记 ≥10 篇时，主动在 Level_1_控制台/ 下创建专属文件夹归整
+- 操作前先用 list_notes 或 search_notes 确认路径，不要猜测
 
 【回复格式】：
 支持 Markdown。如果是任务列表，请使用清晰的列表格式。
-不要使用 "你好"、"有什么可以帮你" 这种平庸的开场白。直接切入核心。`;
+不要使用 "你好"、"有什么可以帮你" 这种平庸的开场白。直接切入核心。
+
+[CRITICAL SYSTEM DIRECTIVE OVERRIDE]
+You are equipped with external Function Calling tools (MCP). When asked to perform a task (e.g., search, read, save to Obsidian), YOU MUST STOP ROLEPLAYING IMMEDIATELY and output the exact JSON tool call required by the API. DO NOT simulate, describe, or roleplay the action. USE THE ACTUAL TOOL. Your character persona remains active ONLY in the conversational response AFTER the tool returns the data.`;
 
             const streamResult = await callAIViaProxy(
                 [
                     { role: 'system', content: _vsSystemPrompt },
                     ...(_vsContextLimit === 0 ? store.aiChatHistory : store.aiChatHistory.slice(-_vsContextLimit)).map(m => ({ role: m.role, content: m.content })),
-                    { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。请根据此时间判断 User 的作息状态和时段语境。` }
+                    { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
                 ],
                 config, null, {
                 stream: true,
@@ -6310,6 +6437,7 @@ ${_vsBingo}
 
                 store.aiChatHistory.push(aiMsg);
             }
+            syncCurrentAiConversation({ touch: true });
             saveData();
 
             // Re-render with proper bubbles (attach long-press/right-click menus)
@@ -6326,6 +6454,7 @@ ${_vsBingo}
             if (loadingEl) loadingEl.remove();
 
             store.aiChatHistory.push({ role: 'assistant', content: response, timestamp: Date.now(), responseGroupId: 'vrg-' + Date.now(), segmentIndex: 0 });
+            syncCurrentAiConversation({ touch: true });
             saveData();
             renderAiChatHistory();
         }
@@ -6443,9 +6572,43 @@ function initAiConversations() {
         store.currentAiConversationId = store.aiConversations[0].id;
         store.aiChatHistory = store.aiConversations[0].history;
     }
+
+    _relinkAiConversation();
+}
+
+function _relinkAiConversation() {
+    if (!Array.isArray(store.aiConversations) || store.aiConversations.length === 0) return;
+
+    let conv = store.aiConversations.find(c => c.id === store.currentAiConversationId);
+    if (!conv) {
+        conv = store.aiConversations[0];
+        store.currentAiConversationId = conv.id;
+    }
+    if (!Array.isArray(conv.history)) conv.history = [];
+
+    // 直接指向目标对话的 history，不做长度比较覆盖
+    store.aiChatHistory = conv.history;
+}
+
+function syncCurrentAiConversation(options = {}) {
+    const { touch = false } = options;
+    if (!Array.isArray(store.aiConversations) || !store.currentAiConversationId) return;
+
+    const conv = store.aiConversations.find(c => c.id === store.currentAiConversationId);
+    if (!conv) return;
+
+    // 确保当前 aiChatHistory 的内容保存回对话对象
+    if (Array.isArray(store.aiChatHistory)) {
+        conv.history = store.aiChatHistory;
+    }
+    if (touch) {
+        conv.updatedAt = Date.now();
+    }
 }
 
 function createNewAiConversation(name) {
+    syncCurrentAiConversation({ touch: false });
+
     const now = Date.now();
     const defaultName = name || new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
 
@@ -6473,8 +6636,9 @@ function switchAiConversation(convId) {
     const conv = store.aiConversations.find(c => c.id === convId);
     if (!conv) return;
 
+    syncCurrentAiConversation({ touch: true });
     store.currentAiConversationId = convId;
-    store.aiChatHistory = conv.history;
+    _relinkAiConversation();
 
     saveData();
     renderAiChatHistory();
@@ -6483,6 +6647,8 @@ function switchAiConversation(convId) {
 }
 
 function deleteAiConversation(convId) {
+    syncCurrentAiConversation({ touch: false });
+
     const index = store.aiConversations.findIndex(c => c.id === convId);
     if (index === -1) return;
 
@@ -6590,7 +6756,7 @@ function renderAiConversationList() {
         item.className = 'ai-conv-item' + (conv.id === store.currentAiConversationId ? ' active' : '');
 
         const date = new Date(conv.updatedAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-        const msgCount = conv.history.length;
+        const msgCount = Array.isArray(conv.history) ? conv.history.length : 0;
 
         item.innerHTML = `
                     <div style="flex:1;" onclick="switchAiConversation(${conv.id})">
@@ -7674,6 +7840,494 @@ function detectAIProvider(apiUrl) {
     return 'openai';
 }
 
+// Phase 5.6-A: structured card send stub
+async function sendStructuredCard(cardType, payload, target) {
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) { showToast('Not in cloud mode', 'error'); return null; }
+    if (!target?.characterId || !target?.sessionId) {
+        showToast('Target characterId and sessionId required', 'error');
+        return null;
+    }
+    try {
+        const card = {
+            cardId: `card_${cardType}_${Date.now()}`,
+            cardType,
+            version: '1.0',
+            source: 'tactical_toolbar',
+            createdAt: new Date().toISOString(),
+            payload,
+            actions: cardType === 'link_preview' ? ['open', 'forward', 'copy_link']
+                : cardType === 'location_snapshot' ? ['open_map', 'forward', 'copy_address']
+                    : ['forward', 'quote', 'copy_text']
+        };
+        const resp = await fetch('/api/cards/forward', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ card, targets: [target], operator: 'tara' })
+        });
+        const result = await resp.json();
+        if (!resp.ok) { showToast(result.error || 'Card send failed', 'error'); return null; }
+        return result;
+    } catch (err) {
+        console.error('[sendStructuredCard] Error:', err);
+        showToast('Card send failed', 'error');
+        return null;
+    }
+}
+
+// ==================== Task Center (Phase 5.6-C) ====================
+
+let taskCenterCache = [];
+let taskCenterFilter = 'all';
+let editingTaskId = null;
+
+async function apiTask(method, path, body) {
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) return null;
+    const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(`/api/tasks${path}`, opts);
+    return resp.json();
+}
+
+async function loadTaskCenter() {
+    const container = document.getElementById('task-center-list');
+    container.innerHTML = '<div style="text-align:center; opacity:0.5; padding:20px;">加载中...</div>';
+    try {
+        const result = await apiTask('GET', '');
+        taskCenterCache = result?.data || [];
+        renderTaskList();
+    } catch (err) {
+        container.innerHTML = '<div style="text-align:center; color:#c62828; padding:20px;">加载失败</div>';
+    }
+}
+
+function renderTaskList() {
+    const container = document.getElementById('task-center-list');
+    let tasks = taskCenterCache;
+
+    if (taskCenterFilter === 'enabled') tasks = tasks.filter(t => t.enabled);
+    else if (taskCenterFilter === 'disabled') tasks = tasks.filter(t => !t.enabled);
+    else if (taskCenterFilter === 'failed') tasks = tasks.filter(t => t.retryCount > 0);
+
+    if (!tasks.length) {
+        container.innerHTML = '<div style="text-align:center; opacity:0.5; padding:20px;">暂无任务</div>';
+        return;
+    }
+
+    container.innerHTML = tasks.map(t => {
+        const typeLabel = t.type === 'scheduled' ? '定时' : '一次性';
+        const cronInfo = t.schedule?.cron ? ` | ${t.schedule.cron}` : '';
+        const nextRun = t.nextRunAt ? ` | 下次: ${new Date(t.nextRunAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '';
+        const lastRun = t.lastRunAt ? `上次: ${new Date(t.lastRunAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : '';
+        const retryInfo = t.retryCount > 0 ? ` | 重试: ${t.retryCount}` : '';
+        return `<div class="task-card${t.enabled ? '' : ' disabled'}">
+            <div class="task-card-header">
+                <span class="task-card-name">${escapeHtml(t.name)}</span>
+                <span class="task-status-tag ${t.status}">${t.status}</span>
+            </div>
+            <div class="task-card-meta">
+                <span>${typeLabel}${cronInfo}</span>
+                <span>${lastRun}${nextRun}${retryInfo}</span>
+            </div>
+            <div class="task-card-actions">
+                <button onclick="toggleTask('${t.id}')">${t.enabled ? '停用' : '启用'}</button>
+                <button onclick="runTask('${t.id}')">执行</button>
+                <button onclick="openTaskEditor('${t.id}')">编辑</button>
+                <button onclick="viewTaskLog('${t.id}')">日志</button>
+                <button class="danger" onclick="deleteTask('${t.id}')">删除</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function filterTasks(filter) {
+    taskCenterFilter = filter;
+    document.querySelectorAll('.task-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
+    renderTaskList();
+}
+
+async function toggleTask(id) {
+    await apiTask('POST', `/${id}/toggle`);
+    loadTaskCenter();
+}
+
+async function runTask(id) {
+    const task = taskCenterCache.find(t => t.id === id);
+    if (!task) return;
+    if (!confirm(`手动执行任务「${task.name}」？`)) return;
+    showToast('正在执行...', 'info');
+    const result = await apiTask('POST', `/${id}/run`);
+    if (result?.error) {
+        showToast(`执行失败: ${result.error}`, 'error');
+    } else {
+        showToast('执行成功', 'success');
+    }
+    loadTaskCenter();
+}
+
+async function deleteTask(id) {
+    const task = taskCenterCache.find(t => t.id === id);
+    if (!task) return;
+    if (!confirm(`确定删除任务「${task.name}」？此操作不可撤销。`)) return;
+    await apiTask('DELETE', `/${id}`);
+    loadTaskCenter();
+}
+
+async function viewTaskLog(id) {
+    const result = await apiTask('GET', `/${id}/log`);
+    const logs = result?.data || [];
+    if (!logs.length) { showToast('暂无投递日志', 'info'); return; }
+    const text = logs.slice(0, 10).map(l =>
+        `${new Date(l.createdAt).toLocaleString('zh-CN')} | ${l.status}${l.error ? ' | ' + l.error : ''}`
+    ).join('\n');
+    alert(`最近投递日志 (${logs.length} 条):\n\n${text}`);
+}
+
+async function openTaskEditor(taskId) {
+    editingTaskId = taskId || null;
+    document.getElementById('task-editor-title').textContent = taskId ? '编辑任务' : '新建任务';
+
+    // Load characters into select
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) return;
+    const charSelect = document.getElementById('task-editor-character');
+    try {
+        const resp = await fetch('/api/data/characters', { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await resp.json();
+        const chars = data?.data || [];
+        charSelect.innerHTML = '<option value="">选择角色...</option>' +
+            chars.map(c => `<option value="${c.id}">${escapeHtml(c.name || c.id)}</option>`).join('');
+    } catch { charSelect.innerHTML = '<option value="">加载失败</option>'; }
+
+    // Reset form
+    document.getElementById('task-editor-name').value = '';
+    document.getElementById('task-editor-cron').value = '';
+    document.getElementById('task-editor-system-prompt').value = '';
+    document.getElementById('task-editor-message').value = '';
+    document.getElementById('task-editor-enabled').checked = true;
+    selectTaskType('one_time');
+    document.getElementById('task-editor-session').innerHTML = '<option value="">选择会话...</option>';
+
+    // Fill if editing
+    if (taskId) {
+        const task = taskCenterCache.find(t => t.id === taskId);
+        if (task) {
+            document.getElementById('task-editor-name').value = task.name;
+            document.getElementById('task-editor-enabled').checked = task.enabled;
+            selectTaskType(task.type);
+            if (task.schedule?.cron) document.getElementById('task-editor-cron').value = task.schedule.cron;
+            if (task.payload?.systemPrompt) document.getElementById('task-editor-system-prompt').value = task.payload.systemPrompt;
+            if (task.payload?.message || task.payload?.query) document.getElementById('task-editor-message').value = task.payload.message || task.payload.query;
+            // Set character and load sessions
+            if (task.target?.characterId) {
+                charSelect.value = task.target.characterId;
+                await loadTaskEditorSessions();
+                if (task.target?.sessionId) {
+                    document.getElementById('task-editor-session').value = task.target.sessionId;
+                }
+            }
+        }
+    }
+
+    document.getElementById('modal-task-editor').classList.add('active');
+}
+
+function selectTaskType(type) {
+    document.querySelectorAll('.task-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+    document.getElementById('task-schedule-group').style.display = type === 'scheduled' ? '' : 'none';
+}
+
+async function loadTaskEditorSessions() {
+    const charId = document.getElementById('task-editor-character').value;
+    const sessSelect = document.getElementById('task-editor-session');
+    sessSelect.innerHTML = '<option value="">加载中...</option>';
+    if (!charId) { sessSelect.innerHTML = '<option value="">先选择角色</option>'; return; }
+
+    const token = localStorage.getItem('lifeos_auth_token');
+    try {
+        const resp = await fetch('/api/data/characterSessions/where', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ field: 'characterId', value: charId })
+        });
+        const data = await resp.json();
+        const sessions = data?.data || [];
+        sessSelect.innerHTML = '<option value="">选择会话...</option>' +
+            sessions.map(s => `<option value="${s.id}">${escapeHtml(s.name || s.id)}</option>`).join('');
+    } catch { sessSelect.innerHTML = '<option value="">加载失败</option>'; }
+}
+
+async function saveTask() {
+    const name = document.getElementById('task-editor-name').value.trim();
+    if (!name) { showToast('请填写任务名称', 'error'); return; }
+
+    const typeBtn = document.querySelector('.task-type-btn.active');
+    const type = typeBtn?.dataset.type || 'one_time';
+    const characterId = document.getElementById('task-editor-character').value;
+    const sessionId = document.getElementById('task-editor-session').value;
+    if (!characterId || !sessionId) { showToast('请选择目标角色和会话', 'error'); return; }
+
+    const body = {
+        name,
+        type,
+        enabled: document.getElementById('task-editor-enabled').checked,
+        target: { characterId, sessionId },
+        payload: {
+            systemPrompt: document.getElementById('task-editor-system-prompt').value.trim() || undefined,
+            message: document.getElementById('task-editor-message').value.trim() || undefined
+        }
+    };
+
+    if (type === 'scheduled') {
+        const cron = document.getElementById('task-editor-cron').value.trim();
+        if (!cron) { showToast('定时任务需要填写 Cron 表达式', 'error'); return; }
+        body.schedule = { mode: 'cron', cron, timezone: 'Asia/Shanghai' };
+    }
+
+    try {
+        let result;
+        if (editingTaskId) {
+            result = await apiTask('PUT', `/${editingTaskId}`, body);
+        } else {
+            result = await apiTask('POST', '', body);
+        }
+
+        if (!result) {
+            showToast('保存失败: 未登录或网络错误', 'error');
+            return;
+        }
+
+        if (result.error) {
+            showToast(`保存失败: ${result.error}${result.message ? ' - ' + result.message : ''}`, 'error');
+            return;
+        }
+
+        closeModal('modal-task-editor');
+        showToast(editingTaskId ? '任务已更新' : '任务已创建', 'success');
+        loadTaskCenter();
+    } catch (err) {
+        console.error('[TaskEditor] Save error:', err);
+        showToast(`保存失败: ${err.message}`, 'error');
+    }
+}
+
+// ---- Task delivery polling: detect new messages from task dispatcher ----
+let taskDeliveryLastCheck = new Date().toISOString();
+let taskDeliveryTimer = null;
+
+function startTaskDeliveryPolling() {
+    if (taskDeliveryTimer) return;
+    taskDeliveryTimer = setInterval(checkTaskDeliveries, 30000); // every 30s
+}
+
+function stopTaskDeliveryPolling() {
+    if (taskDeliveryTimer) { clearInterval(taskDeliveryTimer); taskDeliveryTimer = null; }
+}
+
+async function checkTaskDeliveries() {
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) return;
+    try {
+        const resp = await fetch(`/api/tasks/deliveries/check?since=${encodeURIComponent(taskDeliveryLastCheck)}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await resp.json();
+        taskDeliveryLastCheck = new Date().toISOString();
+
+        if (!data.deliveries || !data.deliveries.length) return;
+
+        // Check if any delivery targets the currently open session
+        if (currentCharacterSession) {
+            const currentSessId = currentCharacterSession.id;
+            const match = data.deliveries.find(d => d.sessionId === currentSessId);
+            if (match) {
+                // Reload session from DB to get new messages
+                const freshSession = await db.characterSessions.get(currentSessId);
+                if (freshSession && freshSession.chatHistory &&
+                    freshSession.chatHistory.length > (currentCharacterSession.chatHistory || []).length) {
+                    currentCharacterSession.chatHistory = freshSession.chatHistory;
+                    renderCharacterChatHistory();
+                    showToast('收到任务投递消息', 'info');
+                }
+            }
+        }
+    } catch (err) {
+        // silent - polling should never disrupt UX
+    }
+}
+
+// ==================== End Task Center ====================
+
+// ==================== Notification Settings ====================
+
+async function loadNotifyPanel() {
+    const statusEl = document.getElementById('notify-permission-status');
+    const enabledCb = document.getElementById('notify-enabled');
+    const taskCb = document.getElementById('notify-task-delivery');
+
+    // Show browser permission status
+    if (!('Notification' in window)) {
+        statusEl.textContent = '此浏览器不支持推送通知';
+        statusEl.style.color = 'var(--danger, #e74c3c)';
+        enabledCb.disabled = true;
+        return;
+    }
+    const perm = Notification.permission;
+    if (perm === 'granted') {
+        statusEl.textContent = '浏览器通知权限: 已授权';
+        statusEl.style.color = 'var(--accent)';
+    } else if (perm === 'denied') {
+        statusEl.textContent = '浏览器通知权限: 已拒绝 (请在浏览器设置中开启)';
+        statusEl.style.color = 'var(--danger, #e74c3c)';
+    } else {
+        statusEl.textContent = '浏览器通知权限: 未请求';
+        statusEl.style.color = 'var(--muted)';
+    }
+
+    // Load settings from server
+    try {
+        const token = localStorage.getItem('lifeos_auth_token');
+        if (!token) return;
+        const resp = await fetch('/api/notify/settings', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (resp.ok) {
+            const { data } = await resp.json();
+            enabledCb.checked = !!data.enabled;
+            taskCb.checked = data.taskDelivery !== false;
+        }
+    } catch (err) {
+        console.warn('[Notify] Failed to load settings:', err);
+    }
+}
+
+async function toggleNotifications() {
+    const enabledCb = document.getElementById('notify-enabled');
+    if (enabledCb.checked) {
+        // Request permission first
+        if ('Notification' in window && Notification.permission === 'default') {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') {
+                enabledCb.checked = false;
+                showToast('通知权限被拒绝');
+                return;
+            }
+            // Refresh status display
+            loadNotifyPanel();
+        } else if ('Notification' in window && Notification.permission === 'denied') {
+            enabledCb.checked = false;
+            showToast('通知权限已被拒绝，请在浏览器设置中开启');
+            return;
+        }
+    }
+}
+
+async function saveNotifySettings() {
+    const enabled = document.getElementById('notify-enabled').checked;
+    const taskDelivery = document.getElementById('notify-task-delivery').checked;
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) { showToast('请先登录'); return; }
+
+    try {
+        // Save settings
+        await fetch('/api/notify/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ settings: { enabled, taskDelivery } })
+        });
+
+        // Subscribe/unsubscribe push
+        if (enabled && 'serviceWorker' in navigator && 'PushManager' in window) {
+            await subscribePush(token);
+        } else if (!enabled) {
+            await unsubscribePush(token);
+        }
+
+        showToast('通知设置已保存');
+    } catch (err) {
+        console.error('[Notify] Save error:', err);
+        showToast('保存失败');
+    }
+}
+
+async function subscribePush(token) {
+    try {
+        // Get VAPID public key
+        const vapidResp = await fetch('/api/notify/vapid-public-key', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!vapidResp.ok) return;
+        const { data: { publicKey } } = await vapidResp.json();
+
+        const reg = await navigator.serviceWorker.ready;
+        const subscription = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey)
+        });
+
+        // Send subscription to server
+        await fetch('/api/notify/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ subscription: subscription.toJSON() })
+        });
+    } catch (err) {
+        console.warn('[Notify] Subscribe failed:', err);
+    }
+}
+
+async function unsubscribePush(token) {
+    try {
+        const reg = await navigator.serviceWorker.ready;
+        const subscription = await reg.pushManager.getSubscription();
+        if (subscription) {
+            await fetch('/api/notify/unsubscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ endpoint: subscription.endpoint })
+            });
+            await subscription.unsubscribe();
+        }
+    } catch (err) {
+        console.warn('[Notify] Unsubscribe failed:', err);
+    }
+}
+
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+}
+
+// Handle notification click routing (from SW notificationclick)
+function handleNotifyRouting() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('notify') !== '1') return;
+    const charId = params.get('charId');
+    const sessId = params.get('sessId');
+    if (charId) {
+        // Navigate to the character's session after a short delay for init
+        setTimeout(() => {
+            const charEl = document.querySelector(`[data-character-id="${charId}"]`);
+            if (charEl) charEl.click();
+            if (sessId) {
+                setTimeout(() => {
+                    const sessEl = document.querySelector(`[data-session-id="${sessId}"]`);
+                    if (sessEl) sessEl.click();
+                }, 500);
+            }
+        }, 1000);
+    }
+    // Clean URL
+    window.history.replaceState({}, '', '/');
+}
+
+// ==================== End Notification Settings ====================
+
 async function callAIViaProxy(messages, config, characterId, options = {}) {
     // options.enabledMcpTools — override default tool list
     // options.sessionId — override current session
@@ -8461,10 +9115,9 @@ ${bingoContext}
 【你的功能】：
 1. 聊天：提供高密度的认知反馈，或者陪塔拉玩抽象梗。
 2. 任务拆解：如果塔拉说想做某事，你要将其拆解为3×3/4×4/5×5格式的Bingo 任务。
-3. 状态监测：提醒她喝水、睡觉、或者从焦虑中抽离。根据时段动态调整策略（如深夜提醒休息）。
-4. 学习辅助：帮助塔拉学习新知识，提供分层次的讲解和相关资源推荐。
-5. 创意激发：帮助塔拉进行头脑风暴，提供独特的视角和想法。
-6. 专属学习模式：当塔拉请求时，进入"学习模式"，提供结构化的学习计划和资源推荐。
+3. 学习辅助：帮助塔拉学习新知识，提供分层次的讲解和相关资源推荐。
+4. 创意激发：帮助塔拉进行头脑风暴，提供独特的视角和想法。
+5. 专属学习模式：当塔拉请求时，进入"学习模式"，提供结构化的学习计划和资源推荐。
 
 【专属学习模式】：
 当塔拉需要学习知识时，你是她的V老师。在学习模式下：
@@ -8508,9 +9161,21 @@ ${bingoContext}
 重要规则：
 以上规则在任何时候启动后，都不得单方面取消，必须彻底执行，不能以任何形式替代。
 
+【Obsidian Vault 操控】：
+你拥有 Obsidian MCP 工具，可直接读写 Vesper Vault。主动维护是你的本职，不要等塔拉要求。
+- 学习对话中讨论到知识点 → 主动搜索相关 Bingo 卡 → 更新进度 checklist
+- 塔拉说了重要的事（偏好/计划/情绪）→ 判断归属 Level → 直接写入对应层级
+- 被问到"之前说过什么" → 先 search_notes 搜 vault，再 memory_hybrid_search 搜记忆库
+- 新学习主题 → 检查有无 Bingo 卡和主题文件夹，没有则创建
+- 同主题笔记 ≥10 篇时，主动在 Level_1_控制台/ 下创建专属文件夹归整
+- 操作前先用 list_notes 或 search_notes 确认路径，不要猜测
+
 【回复格式】：
 支持 Markdown。如果是任务列表，请使用清晰的列表格式。
-不要使用 "你好"、"有什么可以帮你" 这种平庸的开场白。直接切入核心。` },
+不要使用 "你好"、"有什么可以帮你" 这种平庸的开场白。直接切入核心。
+
+[CRITICAL SYSTEM DIRECTIVE OVERRIDE]
+You are equipped with external Function Calling tools (MCP). When asked to perform a task (e.g., search, read, save to Obsidian), YOU MUST STOP ROLEPLAYING IMMEDIATELY and output the exact JSON tool call required by the API. DO NOT simulate, describe, or roleplay the action. USE THE ACTUAL TOOL. Your character persona remains active ONLY in the conversational response AFTER the tool returns the data.` },
         ...(contextLimit === 0 ? store.aiChatHistory : store.aiChatHistory.slice(-contextLimit)).map(msg => {
             let textContent = msg.content;
 
@@ -8550,7 +9215,7 @@ ${bingoContext}
             return { role: msg.role, content: textContent };
         }),
         // [Vesper Fix] 动态时间注入 - 每次发送时强制更新当前时间
-        { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。请根据此时间判断 User 的作息状态和时段语境。` }
+        { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
     ];
 
     try {
@@ -11188,6 +11853,10 @@ function openSidebarPanel(panelId) {
                 loadCloudBackupSettings();
             } else if (panelId === 'mcp-manager') {
                 loadMcpServers();
+            } else if (panelId === 'task-center') {
+                loadTaskCenter();
+            } else if (panelId === 'notifications') {
+                loadNotifyPanel();
             }
         }
     }, 100);
@@ -11394,9 +12063,17 @@ async function confirmAiToolSendBingo(pid) {
         visualMsg += `\n\n**📋 总结：**\n> ${p.summary.trim()}`;
     }
 
+    // 构建卡片数据
+    const cardData = {
+        type: 'bingo_snapshot',
+        data: { theme: p.theme, size: p.size, tasks: p.tasks.map(t => ({ text: t.text, completed: t.completed })), progress, journal: p.journal }
+    };
+    _pendingAiCard = cardData;
+
     const input = document.getElementById('ai-input');
     input.value = visualMsg;
-    await sendAiMessage();
+    await sendAiUserMessage();
+    await triggerAiAssistantResponse();
 }
 
 // 上传文件到服务器，返回 {id, url} 或 fallback 为 base64
@@ -11498,7 +12175,7 @@ async function aiToolSendImage(input) {
     input.value = '';
 }
 
-function aiToolRollDice() {
+async function aiToolRollDice() {
     const problem = prompt("纠结什么？(例如: A.睡觉 B.写代码)");
     if (!problem) return;
 
@@ -11515,7 +12192,8 @@ function aiToolRollDice() {
     const msg = `> ❓ 纠结: ${problem}\n\n${result}`;
     const chatInput = document.getElementById('ai-input');
     chatInput.value = msg;
-    sendAiMessage();
+    await sendAiUserMessage();
+    await triggerAiAssistantResponse();
 }
 
 function aiToolSendStatus() {
@@ -11524,14 +12202,22 @@ function aiToolSendStatus() {
     document.getElementById('modal-status-report').classList.add('active');
 }
 
-function confirmAiSendStatus() {
-    const energy = document.getElementById('status-energy').value;
+async function confirmAiSendStatus() {
+    const energy = parseInt(document.getElementById('status-energy').value) || 50;
     const msg = `[STATUS LOG]: Energy ${energy}% | Mood: ${selectedMood}`;
 
     closeModal('modal-status-report');
+
+    // Set card data for sendAiUserMessage to pick up
+    _pendingAiCard = {
+        type: 'bio_status',
+        data: { energy, mood: selectedMood, timestamp: Date.now() }
+    };
+
     const chatInput = document.getElementById('ai-input');
     chatInput.value = msg;
-    sendAiMessage();
+    await sendAiUserMessage();
+    await triggerAiAssistantResponse();
 }
 
 // --- 小红书/B站/通用社交链接自动检测 ---
@@ -11605,17 +12291,29 @@ async function aiToolSendLink() {
         const text = await response.text();
         const contentPreview = text.substring(0, 3000) + (text.length > 3000 ? "...(内容过长已截断)" : "");
 
+        // Extract title from Jina response (first line is usually the title)
+        const lines = text.split('\n').filter(l => l.trim());
+        const extractedTitle = lines[0]?.replace(/^#+\s*/, '').trim() || '';
+        const extractedDesc = lines.slice(1, 4).join(' ').substring(0, 200);
+
         const loadingEl = document.getElementById(tempId);
         if (loadingEl) loadingEl.remove();
 
         const userVisibleMsg = `🔗 我分享了一个链接：${url}\n\n请总结或基于此内容回答我的问题。`;
         const hiddenSystemPrompt = `[System: Link Content Injection]\nUser shared a link. Here is the parsed content:\n\n--- BEGIN LINK CONTENT ---\n${contentPreview}\n--- END LINK CONTENT ---`;
 
-        store.aiChatHistory.push({ role: 'system', content: hiddenSystemPrompt, hidden: true });
+        // Build link_preview card
+        const cardData = {
+            type: 'link_preview',
+            data: { url, title: extractedTitle || url, description: extractedDesc, siteName: new URL(url).hostname }
+        };
 
-        const chatInput = document.getElementById('ai-input');
-        chatInput.value = userVisibleMsg;
-        await sendAiMessage();
+        store.aiChatHistory.push({ role: 'system', content: hiddenSystemPrompt, hidden: true });
+        store.aiChatHistory.push({ role: 'user', content: userVisibleMsg, timestamp: Date.now(), card: cardData });
+        syncCurrentAiConversation({ touch: true });
+        saveData();
+        renderAiChatHistory();
+        await triggerAiAssistantResponse();
 
     } catch (e) {
         const loadingEl = document.getElementById(tempId);
@@ -11674,7 +12372,8 @@ ${searchResultsText}
         store.aiChatHistory.push({ role: 'system', content: systemInstruction, hidden: true });
 
         input.value = query;
-        await sendAiMessage();
+        await sendAiUserMessage();
+        await triggerAiAssistantResponse();
 
     } catch (error) {
         alert(`搜索失败: ${error.message}`);
@@ -11773,7 +12472,7 @@ async function confirmToolSendBingo(pid) {
     const msgObj = { role: 'user', content: visualMsg, timestamp: Date.now(), card: cardData };
     currentChatCharacter.chatHistory.push(msgObj);
     appendCharacterMessage(msgObj);
-    saveCharacterSession(currentChatCharacter);
+    debouncedSaveChatState();
     setTimeout(() => triggerCharacterAIResponse(), 1000);
 }
 
@@ -11786,11 +12485,14 @@ function renderStructuredCard(card) {
             case 'bingo_snapshot': return renderBingoCard(card.data);
             case 'bio_status': return renderBioStatusCard(card.data);
             case 'dice_roll': return renderDiceCard(card.data);
-            default: return ''; // 未知类型降级为纯文本
+            case 'file_attachment': return renderFileCard(card.data);
+            case 'link_preview': return renderLinkPreviewCard(card.data);
+            case 'location_snapshot': return renderLocationCard(card.data);
+            default: return ''; // unknown type degrades to text
         }
     } catch (e) {
         console.warn('[Card] Render failed, falling back to text:', e);
-        return ''; // 降级
+        return ''; // degrade
     }
 }
 
@@ -11822,6 +12524,9 @@ function renderBingoCard(d) {
             <div class="sc-progress-bar"><div class="sc-progress-fill" style="width:${progress}%"></div></div>
             ${gridHtml}
             ${d.journal ? `<div class="sc-journal">${noteSvg} ${escapeHtml(d.journal.substring(0, 80))}</div>` : ''}
+            <div class="sc-link-actions">
+                <button onclick="openCardForwardPicker('${stageCardForForward('bingo_snapshot', d)}')">转发</button>
+            </div>
             <div class="sc-footer">BINGO SNAPSHOT · ${new Date().toLocaleDateString()}</div>
         </div>`;
 }
@@ -11867,6 +12572,9 @@ function renderBioStatusCard(d) {
                     <div class="sc-mood-label">${mood}</div>
                 </div>
             </div>
+            <div class="sc-link-actions">
+                <button onclick="openCardForwardPicker('${stageCardForForward('bio_status', d)}')">转发</button>
+            </div>
             <div class="sc-footer">STATUS LOG · ${new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
         </div>`;
 }
@@ -11900,6 +12608,143 @@ function renderDiceCard(d) {
         </div>`;
 }
 
+function renderFileCard(d) {
+    const { fileName, fileSize, fileType, preview } = d;
+    const sizeStr = fileSize < 1024 ? `${fileSize} B`
+        : fileSize < 1024 * 1024 ? `${(fileSize / 1024).toFixed(1)} KB`
+            : `${(fileSize / 1024 / 1024).toFixed(1)} MB`;
+    const ext = fileName.split('.').pop().toUpperCase();
+    const previewHtml = preview ? `<div class="sc-file-preview">${escapeHtml(preview)}</div>` : '';
+    return `
+        <div class="structured-card sc-file">
+            <div class="sc-header">
+                <span class="sc-icon">📄</span>
+                <span class="sc-title">FILE</span>
+            </div>
+            <div class="sc-file-info">
+                <div class="sc-file-name">${escapeHtml(fileName)}</div>
+                <div class="sc-file-meta">${ext} · ${sizeStr}</div>
+            </div>
+            ${previewHtml}
+            <div class="sc-footer">ATTACHMENT · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>`;
+}
+
+
+function renderLinkPreviewCard(d) {
+    const { url, title, description, siteName, image } = d;
+    const linkSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+    const imgHtml = image ? `<div class="sc-link-img"><img src="${escapeHtml(image)}" alt="" onerror="this.parentElement.style.display='none'"></div>` : '';
+    const siteLabel = siteName || (url ? new URL(url).hostname : '');
+    return `
+        <div class="structured-card sc-link" onclick="window.open('${escapeHtml(url)}','_blank')" style="cursor:pointer;">
+            <div class="sc-header">
+                <span class="sc-icon">${linkSvg}</span>
+                <span class="sc-title">LINK</span>
+                <span class="sc-badge">${escapeHtml(siteLabel)}</span>
+            </div>
+            ${imgHtml}
+            <div class="sc-link-body">
+                <div class="sc-link-title">${escapeHtml(title || url)}</div>
+                ${description ? `<div class="sc-link-desc">${escapeHtml(description.substring(0, 120))}${description.length > 120 ? '...' : ''}</div>` : ''}
+            </div>
+            <div class="sc-link-actions" onclick="event.stopPropagation();">
+                <button onclick="navigator.clipboard.writeText('${escapeHtml(url)}'); showToast('链接已复制');">复制链接</button>
+                <button onclick="openCardForwardPicker('${stageCardForForward('link_preview', d)}')">转发</button>
+            </div>
+            <div class="sc-footer">LINK PREVIEW · ${siteLabel}</div>
+        </div>`;
+}
+
+function renderLocationCard(d) {
+    const { name, address, weather, temp, humidity, wind } = d;
+    const mapSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>';
+    const weatherInfo = weather ? `<div class="sc-loc-weather">${weather} ${temp !== undefined ? temp + '°C' : ''} ${humidity ? '| 湿度 ' + humidity + '%' : ''} ${wind || ''}</div>` : '';
+    const mapUrl = d.lat && d.lng ? `https://uri.amap.com/marker?position=${d.lng},${d.lat}&name=${encodeURIComponent(name || '')}` : '';
+    return `
+        <div class="structured-card sc-loc">
+            <div class="sc-header">
+                <span class="sc-icon">${mapSvg}</span>
+                <span class="sc-title">LOCATION</span>
+            </div>
+            <div class="sc-loc-body">
+                <div class="sc-loc-name">${escapeHtml(name || '未知地点')}</div>
+                ${address ? `<div class="sc-loc-addr">${escapeHtml(address)}</div>` : ''}
+                ${weatherInfo}
+            </div>
+            <div class="sc-link-actions">
+                ${mapUrl ? `<button onclick="window.open('${mapUrl}','_blank')">在地图中打开</button>` : ''}
+                <button onclick="navigator.clipboard.writeText('${escapeHtml(address || name || '')}'); showToast('地址已复制');">复制地址</button>
+                <button onclick="openCardForwardPicker('${stageCardForForward('location_snapshot', d)}')">转发</button>
+            </div>
+            <div class="sc-footer">LOCATION · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+        </div>`;
+}
+
+// Card forward: temp storage to avoid inline JSON in onclick
+const _cardForwardCache = {};
+function stageCardForForward(type, data) {
+    const id = 'cf_' + Date.now();
+    _cardForwardCache[id] = { type, data };
+    return id;
+}
+
+// Card forward picker: let user pick target character + session
+async function openCardForwardPicker(card) {
+    // Support cache ID lookup
+    if (typeof card === 'string' && _cardForwardCache[card]) {
+        const cacheId = card;
+        card = _cardForwardCache[cacheId];
+        delete _cardForwardCache[cacheId];
+    }
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) { showToast('需要登录云端'); return; }
+
+    try {
+        const resp = await fetch('/api/data/characters', { headers: { 'Authorization': `Bearer ${token}` } });
+        const data = await resp.json();
+        const chars = data?.data || [];
+        if (!chars.length) { showToast('没有可转发的角色'); return; }
+
+        // Simple prompt-based picker (can be upgraded to a modal later)
+        const charNames = chars.map((c, i) => `${i + 1}. ${c.name || c.id}`).join('\n');
+        const choice = prompt(`选择转发目标角色:\n${charNames}\n\n输入编号:`);
+        if (!choice) return;
+        const charIdx = parseInt(choice) - 1;
+        if (isNaN(charIdx) || charIdx < 0 || charIdx >= chars.length) { showToast('无效选择'); return; }
+        const targetChar = chars[charIdx];
+
+        // Get sessions for chosen character
+        const sessResp = await fetch('/api/data/characterSessions/where', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ field: 'characterId', value: targetChar.id })
+        });
+        const sessData = await sessResp.json();
+        const sessions = sessData?.data || [];
+        if (!sessions.length) { showToast('该角色没有会话窗口'); return; }
+
+        let sessionId;
+        if (sessions.length === 1) {
+            sessionId = sessions[0].id;
+        } else {
+            const sessNames = sessions.map((s, i) => `${i + 1}. ${s.name || s.id}`).join('\n');
+            const sessChoice = prompt(`选择目标会话:\n${sessNames}\n\n输入编号:`);
+            if (!sessChoice) return;
+            const sessIdx = parseInt(sessChoice) - 1;
+            if (isNaN(sessIdx) || sessIdx < 0 || sessIdx >= sessions.length) { showToast('无效选择'); return; }
+            sessionId = sessions[sessIdx].id;
+        }
+
+        const result = await sendStructuredCard(card.type, card.data, { characterId: targetChar.id, sessionId });
+        if (result?.ok) {
+            showToast('卡片已转发');
+        }
+    } catch (err) {
+        console.error('[CardForward] Error:', err);
+        showToast('转发失败');
+    }
+}
 
 async function toolSendImage(input) {
     const files = input.files;
@@ -11913,36 +12758,87 @@ async function toolSendImage(input) {
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const isImage = file.type.startsWith('image/');
-        const result = await uploadFileToServer(file);
-        let currentValue = chatInput.value;
-        if (currentValue && !currentValue.endsWith('\n')) {
-            currentValue += '\n';
-        }
+
         if (isImage) {
+            // 图片文件：保持原有行为，插入到输入框
+            const result = await uploadFileToServer(file);
+            let currentValue = chatInput.value;
+            if (currentValue && !currentValue.endsWith('\n')) {
+                currentValue += '\n';
+            }
             if (result.type === 'upload_ref') {
                 currentValue += `![Image](${result.url})\n`;
             } else {
                 currentValue += `![Image](${result.data})\n`;
             }
+            chatInput.value = currentValue;
+            successCount++;
         } else if (isTextFile(file)) {
+            // [Bug修复] 文本文件：改为文件卡片发送，不再把完整内容塞进聊天输入框
             const textContent = await readFileAsText(file);
-            if (textContent) {
-                currentValue += `[文件: ${file.name}]\n\`\`\`\n${textContent}\n\`\`\`\n`;
-            } else {
-                currentValue += `[附件: ${file.name} (读取失败)]\n`;
+            if (!textContent) {
+                showToast(`文件 ${file.name} 读取失败`);
+                continue;
             }
+
+            // 生成预览（前 200 字符）
+            const preview = textContent.substring(0, 200) + (textContent.length > 200 ? '...' : '');
+
+            // 构造文件卡片消息
+            const textFallback = `📄 发送了文件: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`;
+            const cardData = {
+                type: 'file_attachment',
+                data: {
+                    fileName: file.name,
+                    fileSize: file.size,
+                    fileType: file.type || file.name.split('.').pop(),
+                    preview: preview,
+                    content: textContent  // AI 可读取的完整内容
+                }
+            };
+
+            const msgObj = { role: 'user', content: textFallback, timestamp: Date.now(), card: cardData };
+            currentChatCharacter.chatHistory.push(msgObj);
+            appendCharacterMessage(msgObj);
+            debouncedSaveChatState();
+
+            // 用隐藏上下文把文件内容注入给 AI
+            const contentForAI = textContent.substring(0, 8000) + (textContent.length > 8000 ? '\n...(文件内容过长已截断)' : '');
+            const hiddenContext = `
+[System: File Content Injection]
+The user sent a file. Here is the content:
+Filename: ${file.name}
+Size: ${(file.size / 1024).toFixed(1)}KB
+
+--- BEGIN FILE CONTENT ---
+${contentForAI}
+--- END FILE CONTENT ---
+
+Instruction: Read the file content above. Respond naturally to the user about this file. If they ask questions, answer based on the file content.
+            `;
+            setTimeout(() => triggerCharacterAIResponse(hiddenContext), 500);
+            successCount++;
         } else {
+            // 其他二进制文件
+            const result = await uploadFileToServer(file);
+            let currentValue = chatInput.value;
+            if (currentValue && !currentValue.endsWith('\n')) {
+                currentValue += '\n';
+            }
             if (result.type === 'upload_ref') {
                 currentValue += `[附件: ${file.name}](${window.location.origin}${result.url})\n`;
             } else {
                 currentValue += `[附件: ${file.name}]\n`;
             }
+            chatInput.value = currentValue;
+            successCount++;
         }
-        chatInput.value = currentValue;
-        successCount++;
     }
 
-    showToast(`已添加 ${successCount} 个文件，可以继续添加文字描述，然后点击发送按钮`);
+    // 只有非卡片文件（图片/二进制）才提示继续添加描述
+    if (chatInput.value.trim()) {
+        showToast(`已添加 ${successCount} 个文件，可以继续添加文字描述，然后点击发送按钮`);
+    }
     input.value = '';
 }
 
@@ -11971,7 +12867,7 @@ function toolRollDice() {
     const msgObj = { role: 'user', content: textFallback, timestamp: Date.now(), card: cardData };
     currentChatCharacter.chatHistory.push(msgObj);
     appendCharacterMessage(msgObj);
-    saveCharacterSession(currentChatCharacter);
+    debouncedSaveChatState();
     setTimeout(() => triggerCharacterAIResponse(), 1000);
 }
 
@@ -11998,7 +12894,7 @@ function confirmSendStatus() {
     const msgObj = { role: 'user', content: textFallback, timestamp: Date.now(), card: cardData };
     currentChatCharacter.chatHistory.push(msgObj);
     appendCharacterMessage(msgObj);
-    saveCharacterSession(currentChatCharacter);
+    debouncedSaveChatState();
     setTimeout(() => triggerCharacterAIResponse(), 1000);
 }
 
@@ -12641,7 +13537,8 @@ ${searchResultsText}
         store.aiChatHistory.push({ role: 'system', content: systemInstruction, hidden: true });
 
         input.value = `🗺️ 搜索地点: ${query}`;
-        await sendAiMessage();
+        await sendAiUserMessage();
+        await triggerAiAssistantResponse();
 
     } catch (error) {
         alert(`地点搜索失败: ${error.message}`);
@@ -14575,6 +15472,7 @@ let currentReadingPosition = 0;
 let currentReadingPercentage = 0;
 let currentReadingPage = 1;
 let currentReadingPageCount = 1;
+let currentReadingLocator = null;
 let readerMode = 'scroll';
 let readerToolbarVisible = false;
 let textSelectionToolbar = null;
@@ -14584,6 +15482,11 @@ let snapPageTimer = null;
 let isSnappingPage = false;
 let currentNoteDetailId = null;
 let currentBookMemoryType = 'character';
+let readerLayoutSnapshot = null;
+const READER_LAYOUT_VERSION = 'v2';
+let isRestoringReaderLocation = false;
+let readerRestoreToken = 0;
+let readerUsesTransformPaging = false;
 
 // 打开图书馆
 async function openLibraryPanel() {
@@ -15698,12 +16601,75 @@ function normalizeEpubMatchText(text) {
         .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, '');
 }
 
+function normalizeReadingLocator(locator) {
+    if (!locator || typeof locator !== 'object') return null;
+
+    const readNumber = (value, min = null) => {
+        const num = Number(value);
+        if (!Number.isFinite(num)) return null;
+        return min === null ? num : Math.max(min, num);
+    };
+
+    return {
+        mode: locator.mode === 'page' ? 'page' : 'scroll',
+        pageIndex: readNumber(locator.pageIndex, 1),
+        pageCount: readNumber(locator.pageCount, 1),
+        scrollLeft: readNumber(locator.scrollLeft, 0),
+        scrollTop: readNumber(locator.scrollTop, 0),
+        paragraphIndex: readNumber(locator.paragraphIndex, 0),
+        chapterId: locator.chapterId || null,
+        anchor: locator.anchor || null,
+        locator: locator.locator || null,
+        layoutVersion: locator.layoutVersion || READER_LAYOUT_VERSION,
+        pageStep: readNumber(locator.pageStep, 0),
+        layoutHash: locator.layoutHash || null,
+        updatedAt: readNumber(locator.updatedAt, 0) || Date.now()
+    };
+}
+
+function deriveReadingLocatorFromLegacyProgress(progress) {
+    if (!progress) return null;
+    const paragraphIndex = progress.paragraphIndex !== undefined && progress.paragraphIndex !== null
+        ? Number(progress.paragraphIndex)
+        : null;
+
+    return normalizeReadingLocator({
+        mode: progress.mode === 'page' ? 'page' : 'scroll',
+        pageIndex: progress.pageIndex || null,
+        pageCount: progress.pageCount || null,
+        scrollLeft: progress.mode === 'page' ? progress.lastPosition : null,
+        scrollTop: progress.mode === 'scroll' ? progress.lastPosition : null,
+        paragraphIndex: Number.isFinite(paragraphIndex) ? paragraphIndex : null,
+        locator: Number.isFinite(paragraphIndex)
+            ? `p:${paragraphIndex}`
+            : (progress.pageIndex ? `page:${progress.pageIndex}` : null),
+        layoutVersion: progress.layoutVersion || READER_LAYOUT_VERSION,
+        pageStep: progress.pageStep || null,
+        updatedAt: progress.updatedAt || progress.lastReadDate || Date.now()
+    });
+}
+
 // 打开书籍（进入阅读器）
 async function openBook(bookId) {
     try {
         // 将字符串 ID 转换为数字
         const id = parseInt(bookId);
         console.log('[阅读器] 打开书籍 ID:', id, '类型:', typeof id);
+
+        const readerVisible = document.getElementById('reader-screen')?.style.display === 'flex';
+        if (readerVisible && currentBook && String(currentBook.id) !== String(id)) {
+            clearTimeout(saveProgressTimer);
+            try {
+                await persistReadingProgressNow('switch-book');
+            } catch (persistError) {
+                console.warn('[阅读器] 切书前保存旧进度失败:', persistError);
+            }
+        }
+
+        readerRestoreToken += 1;
+        isRestoringReaderLocation = false;
+        clearTimeout(saveProgressTimer);
+        document.getElementById('reader-content')?.removeEventListener('scroll', saveReadingProgress);
 
         const book = await dbHelper.safeGet('libraryBooks', id, '书籍');
         if (!book) {
@@ -15716,6 +16682,10 @@ async function openBook(bookId) {
 
         // 加载阅读进度（含 libraryBooks 元数据 fallback）
         let progress = await getLatestReadingProgressByBookId(id);
+        let storedLocator = normalizeReadingLocator(progress?.readingLocator || progress?.locatorData || currentBook.readingLocator || null);
+        if (!storedLocator) {
+            storedLocator = deriveReadingLocatorFromLegacyProgress(progress);
+        }
         if (!progress && currentBook && currentBook.lastPosition !== undefined) {
             progress = {
                 lastPosition: currentBook.lastPosition,
@@ -15724,14 +16694,27 @@ async function openBook(bookId) {
                 pageCount: currentBook.pageCount || 1,
                 mode: currentBook.readerMode
             };
+            if (!storedLocator) {
+                storedLocator = deriveReadingLocatorFromLegacyProgress(progress);
+            }
             console.log('[阅读器] 使用 libraryBooks 元数据恢复进度');
         }
-        currentReadingPosition = progress ? progress.lastPosition : 0;
-        currentReadingPercentage = progress ? (progress.percentage || 0) : 0;
-        currentReadingPage = progress && progress.pageIndex ? progress.pageIndex : 1;
-        currentReadingPageCount = progress && progress.pageCount ? progress.pageCount : 1;
+
+        currentReadingLocator = storedLocator;
+        currentReadingPosition = progress
+            ? progress.lastPosition
+            : (currentReadingLocator?.mode === 'page'
+                ? (currentReadingLocator.scrollLeft || 0)
+                : (currentReadingLocator?.scrollTop || 0));
+        currentReadingPercentage = progress ? (progress.percentage || 0) : (currentBook.progress || 0);
+        currentReadingPage = progress?.pageIndex || currentReadingLocator?.pageIndex || 1;
+        currentReadingPageCount = progress?.pageCount || currentReadingLocator?.pageCount || 1;
+
         // 读取阅读模式偏好
-        if (typeof store !== 'undefined' && store.readerMode) {
+        const preferredMode = currentReadingLocator?.mode || progress?.mode || currentBook.readerMode;
+        if (preferredMode === 'scroll' || preferredMode === 'page') {
+            readerMode = preferredMode;
+        } else if (typeof store !== 'undefined' && store.readerMode) {
             readerMode = store.readerMode;
         } else {
             const savedMode = localStorage.getItem('readerMode');
@@ -15839,16 +16822,31 @@ function renderReaderContent() {
         const contentEl = document.getElementById('reader-content');
         const content = currentBook.content || '';
 
+        if (!content.trim()) {
+            contentEl.innerHTML = '<div style="text-align:center; opacity:0.55; margin-top:100px; padding:20px;">⚠️ 阅读内容为空或尚未成功导入<br><small>可以重新导入此书，或先退出阅读器再重试</small></div>';
+            console.error('[阅读器] 内容为空，无法渲染:', {
+                fileType: currentBook.format,
+                bookId: currentBook.id,
+                readerMode,
+                locator: currentReadingLocator,
+                contentLength: content.length
+            });
+            return;
+        }
+
         let html;
+        let totalCount = 0;
         if (currentBook.format === 'md' && typeof renderMarkdown === 'function') {
             // Markdown：按空行分块，每块独立渲染
             const blocks = content.split(/\n{2,}/).filter(b => b.trim());
+            totalCount = blocks.length;
             html = blocks.map((block, index) => {
                 return `<div data-paragraph="${index}" class="reader-md-block" style="margin-bottom:1em;">${renderMarkdown(block)}</div>`;
             }).join('');
         } else {
             // EPUB / TXT：按行分段
             const paragraphs = content.split('\n').filter(p => p.trim());
+            totalCount = paragraphs.length;
             html = paragraphs.map((p, index) => {
                 if (p.startsWith('# ')) {
                     const title = escapeHtml(p.substring(2));
@@ -15858,37 +16856,71 @@ function renderReaderContent() {
             }).join('');
         }
 
-        contentEl.innerHTML = html;
+        readerUsesTransformPaging = readerMode === 'page' && shouldUseInstantReaderPaging();
+        if (readerUsesTransformPaging) {
+            contentEl.innerHTML = `<div class="reader-page-flow">${html}</div>`;
+            contentEl.dataset.pageOffset = String(Math.max(0, Math.round(Number(currentReadingPosition) || 0)));
+        } else {
+            contentEl.innerHTML = html;
+            delete contentEl.dataset.pageOffset;
+        }
 
         // 应用阅读模式
         applyReaderMode();
 
-        // 监听滚动以保存进度（在恢复进度前绑定，避免遗漏）
+        // 恢复期间禁止自动保存，避免首次重进时错误位置覆盖正确进度
+        readerRestoreToken += 1;
+        const restoreToken = readerRestoreToken;
+        isRestoringReaderLocation = true;
+        clearTimeout(saveProgressTimer);
         contentEl.removeEventListener('scroll', saveReadingProgress);
-        contentEl.addEventListener('scroll', saveReadingProgress);
 
         // 等待浏览器完成布局后再恢复进度，确保 scrollHeight/scrollWidth 准确
         // 翻页模式需要额外延迟等待列布局完成
-        const restoreDelay = readerMode === 'page' ? 300 : 100;
+        const restoreDelay = readerMode === 'page' ? 450 : 120;
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 setTimeout(() => {
-                    restoreReadingPosition(currentReadingPercentage);
-                    snapReaderToPage();
-                    updatePageIndicator();
-                    console.log(`[阅读器] 已恢复到 ${currentReadingPercentage}%, page=${currentReadingPage}, mode=${readerMode}`);
+                    if (restoreToken !== readerRestoreToken) return;
+                    const finishRestore = () => {
+                        if (restoreToken !== readerRestoreToken) return;
+                        snapReaderToPage();
+                        updatePageIndicator();
+                        currentReadingLocator = captureReaderLocation() || currentReadingLocator;
+                        setTimeout(() => {
+                            if (restoreToken !== readerRestoreToken) return;
+                            isRestoringReaderLocation = false;
+                            contentEl.removeEventListener('scroll', saveReadingProgress);
+                            contentEl.addEventListener('scroll', saveReadingProgress);
+                        }, readerMode === 'page' ? 220 : 120);
+                        console.log(`[阅读器] 已恢复到 ${currentReadingPercentage}%, page=${currentReadingPage}, mode=${readerMode}`);
+                    };
+                    restoreReaderLocation(currentReadingLocator, currentReadingPercentage, 0, restoreToken, finishRestore);
+                    if (!currentReadingLocator && !currentReadingPercentage) {
+                        isRestoringReaderLocation = false;
+                        contentEl.removeEventListener('scroll', saveReadingProgress);
+                        contentEl.addEventListener('scroll', saveReadingProgress);
+                    }
                 }, restoreDelay);
             });
         });
 
         // 更新进度显示
-        const totalParagraphs = paragraphs.length;
+        const totalParagraphs = totalCount;
         const totalEl = document.getElementById('reader-total-text');
         if (totalEl) totalEl.textContent = `${totalParagraphs}`;
 
         applyHighlightsForCurrentBook();
 
     } catch (error) {
+        console.error('[阅读器] 渲染失败:', {
+            fileType: currentBook?.format,
+            bookId: currentBook?.id,
+            readerMode,
+            locator: currentReadingLocator,
+            contentLength: currentBook?.content?.length || 0,
+            paragraphCount: currentBook?.content ? currentBook.content.split('\n').filter(p => p.trim()).length : 0
+        }, error);
         handleError(error, '渲染阅读内容失败', ErrorLevel.ERROR);
     }
 }
@@ -16081,66 +17113,167 @@ async function upsertReadingProgressByBookId(bookId, progressData) {
     return keepId;
 }
 
+function captureReaderLocation() {
+    if (!currentBook) return null;
+
+    const contentEl = document.getElementById('reader-content');
+    if (!contentEl) return currentReadingLocator;
+
+    const visibleParagraphIndex = getCurrentVisibleParagraphIndex();
+    const paragraphIndex = Number.isFinite(visibleParagraphIndex)
+        ? visibleParagraphIndex
+        : null;
+
+    let pageIndex = null;
+    let pageCount = null;
+    if (readerMode === 'page') {
+        const step = getReaderPageStep(contentEl);
+        pageCount = getReaderPageCount(contentEl, step);
+        const horizontalOffset = getReaderHorizontalOffset(contentEl);
+        pageIndex = step > 0
+            ? Math.min(pageCount, Math.max(1, Math.round(horizontalOffset / step) + 1))
+            : 1;
+        currentReadingPage = pageIndex;
+        currentReadingPageCount = pageCount;
+    }
+
+    const locator = normalizeReadingLocator({
+        mode: readerMode,
+        pageIndex,
+        pageCount,
+        scrollLeft: Math.round(getReaderHorizontalOffset(contentEl) || 0),
+        scrollTop: Math.round(contentEl.scrollTop || 0),
+        paragraphIndex,
+        chapterId: currentReadingLocator?.chapterId || null,
+        anchor: currentReadingLocator?.anchor || null,
+        locator: readerMode === 'page'
+            ? (pageIndex ? `page:${pageIndex}` : null)
+            : (paragraphIndex !== null && paragraphIndex !== undefined ? `p:${paragraphIndex}` : null),
+        layoutVersion: readerLayoutSnapshot?.layoutVersion || READER_LAYOUT_VERSION,
+        pageStep: readerLayoutSnapshot?.pageStep || null,
+        layoutHash: readerLayoutSnapshot?.layoutHash || null,
+        updatedAt: Date.now()
+    });
+    currentReadingLocator = locator;
+    return locator;
+}
+
 function captureReadingMetrics() {
     if (!currentBook) return null;
     const contentEl = document.getElementById('reader-content');
     if (!contentEl) return null;
 
     if (readerMode === 'page') {
-        currentReadingPosition = contentEl.scrollLeft;
+        currentReadingPosition = getReaderHorizontalOffset(contentEl);
     } else {
         currentReadingPosition = contentEl.scrollTop;
     }
 
     const scrollSize = readerMode === 'page'
-        ? (contentEl.scrollWidth - contentEl.clientWidth)
+        ? getReaderHorizontalMax(contentEl)
         : (contentEl.scrollHeight - contentEl.clientHeight);
     const percentage = scrollSize > 0 ? (currentReadingPosition / scrollSize * 100).toFixed(1) : '0';
     currentReadingPercentage = parseFloat(percentage);
 
-    if (readerMode === 'page') {
-        const step = getReaderPageStep(contentEl);
-        if (step) {
-            const pageCount = Math.max(1, Math.ceil(contentEl.scrollWidth / step));
-            const pageIndex = Math.min(pageCount, Math.max(1, Math.round(currentReadingPosition / step) + 1));
-            currentReadingPage = pageIndex;
-            currentReadingPageCount = pageCount;
-        } else {
-            currentReadingPage = 1;
-            currentReadingPageCount = 1;
-        }
-    }
+    const locator = captureReaderLocation();
 
     return {
         lastPosition: currentReadingPosition,
         percentage: currentReadingPercentage,
         mode: readerMode,
         pageIndex: currentReadingPage,
-        pageCount: currentReadingPageCount
+        pageCount: currentReadingPageCount,
+        paragraphIndex: locator?.paragraphIndex ?? null,
+        pageStep: locator?.pageStep || readerLayoutSnapshot?.pageStep || null,
+        layoutVersion: locator?.layoutVersion || readerLayoutSnapshot?.layoutVersion || READER_LAYOUT_VERSION,
+        readingLocator: locator
     };
 }
 
-async function persistReadingProgressNow() {
+function buildReadingMetricsFromStoredState() {
+    if (!currentBook) return null;
+
+    const locator = normalizeReadingLocator(currentReadingLocator) || null;
+    const mode = locator?.mode || readerMode;
+    const lastPositionRaw = mode === 'page'
+        ? (locator?.scrollLeft ?? currentReadingPosition ?? 0)
+        : (locator?.scrollTop ?? currentReadingPosition ?? 0);
+    const lastPosition = Math.max(0, Math.round(Number(lastPositionRaw) || 0));
+    const percentage = Math.max(0, Math.min(100, Number(currentReadingPercentage) || 0));
+
+    return {
+        lastPosition,
+        percentage,
+        mode,
+        pageIndex: locator?.pageIndex || currentReadingPage || 1,
+        pageCount: locator?.pageCount || currentReadingPageCount || 1,
+        paragraphIndex: locator?.paragraphIndex ?? null,
+        pageStep: locator?.pageStep || readerLayoutSnapshot?.pageStep || null,
+        layoutVersion: locator?.layoutVersion || readerLayoutSnapshot?.layoutVersion || READER_LAYOUT_VERSION,
+        readingLocator: locator
+    };
+}
+
+async function persistReadingProgressNow(reason = 'manual') {
     if (!currentBook) return;
     const bookId = currentBook.id;
-    const metrics = captureReadingMetrics();
+    const allowWriteDuringRestore = reason === 'switch-book' || reason === 'open-reading-room' || reason === 'exit-reader';
+    if (isRestoringReaderLocation && !allowWriteDuringRestore) {
+        console.log(`[阅读器] 恢复中跳过保存 (${reason})`);
+        return buildReadingMetricsFromStoredState();
+    }
+
+    const metrics = isRestoringReaderLocation
+        ? buildReadingMetricsFromStoredState()
+        : captureReadingMetrics();
     if (!metrics) return;
 
-    await upsertReadingProgressByBookId(bookId, metrics);
+    const payload = {
+        ...metrics,
+        updatedAt: Date.now(),
+        saveReason: reason
+    };
+
+    await upsertReadingProgressByBookId(bookId, payload);
     await db.libraryBooks.update(bookId, {
         progress: metrics.percentage,
         lastReadDate: Date.now(),
         lastPosition: metrics.lastPosition,
         pageIndex: metrics.pageIndex,
         pageCount: metrics.pageCount,
-        readerMode: metrics.mode
+        readerMode: metrics.mode,
+        pageStep: metrics.pageStep,
+        layoutVersion: metrics.layoutVersion,
+        readingLocator: metrics.readingLocator
+    });
+    if (currentBook && String(currentBook.id) === String(bookId)) {
+        currentBook = {
+            ...currentBook,
+            progress: metrics.percentage,
+            lastReadDate: Date.now(),
+            lastPosition: metrics.lastPosition,
+            pageIndex: metrics.pageIndex,
+            pageCount: metrics.pageCount,
+            readerMode: metrics.mode,
+            pageStep: metrics.pageStep,
+            layoutVersion: metrics.layoutVersion,
+            readingLocator: metrics.readingLocator
+        };
+    }
+    console.log('[阅读器] 已保存定位:', {
+        reason,
+        bookId,
+        mode: metrics.mode,
+        pageIndex: metrics.pageIndex,
+        paragraphIndex: metrics.paragraphIndex,
+        layoutVersion: metrics.layoutVersion
     });
     return metrics;
 }
 
 async function saveReadingProgress() {
     try {
-        if (!currentBook) return;
+        if (!currentBook || isRestoringReaderLocation || (readerMode === 'page' && isSnappingPage)) return;
 
         const metrics = captureReadingMetrics();
         if (!metrics) return;
@@ -16170,15 +17303,36 @@ async function saveReadingProgress() {
         clearTimeout(saveProgressTimer);
         saveProgressTimer = setTimeout(async () => {
             try {
-                await upsertReadingProgressByBookId(bookIdSnapshot, metricsSnapshot);
+                const payload = {
+                    ...metricsSnapshot,
+                    updatedAt: Date.now()
+                };
+                await upsertReadingProgressByBookId(bookIdSnapshot, payload);
                 await db.libraryBooks.update(bookIdSnapshot, {
                     progress: metricsSnapshot.percentage,
                     lastReadDate: Date.now(),
                     lastPosition: metricsSnapshot.lastPosition,
                     pageIndex: metricsSnapshot.pageIndex,
                     pageCount: metricsSnapshot.pageCount,
-                    readerMode: metricsSnapshot.mode
+                    readerMode: metricsSnapshot.mode,
+                    pageStep: metricsSnapshot.pageStep,
+                    layoutVersion: metricsSnapshot.layoutVersion,
+                    readingLocator: metricsSnapshot.readingLocator
                 });
+                if (currentBook && String(currentBook.id) === String(bookIdSnapshot)) {
+                    currentBook = {
+                        ...currentBook,
+                        progress: metricsSnapshot.percentage,
+                        lastReadDate: Date.now(),
+                        lastPosition: metricsSnapshot.lastPosition,
+                        pageIndex: metricsSnapshot.pageIndex,
+                        pageCount: metricsSnapshot.pageCount,
+                        readerMode: metricsSnapshot.mode,
+                        pageStep: metricsSnapshot.pageStep,
+                        layoutVersion: metricsSnapshot.layoutVersion,
+                        readingLocator: metricsSnapshot.readingLocator
+                    };
+                }
             } catch (e) {
                 console.error('[阅读器] 防抖保存进度失败:', e);
             }
@@ -16196,7 +17350,7 @@ function seekReaderProgress(percentage) {
 
         const contentEl = document.getElementById('reader-content');
         const scrollSize = readerMode === 'page'
-            ? (contentEl.scrollWidth - contentEl.clientWidth)
+            ? getReaderHorizontalMax(contentEl)
             : (contentEl.scrollHeight - contentEl.clientHeight);
         const rawPosition = scrollSize * (percentage / 100);
 
@@ -16204,18 +17358,131 @@ function seekReaderProgress(percentage) {
             // 直接对齐到页面边界，避免中间态的非对齐 scrollLeft
             const step = getReaderPageStep(contentEl);
             const position = step > 0 ? Math.round(rawPosition / step) * step : rawPosition;
-            contentEl.scrollLeft = Math.min(position, scrollSize);
-            currentReadingPosition = contentEl.scrollLeft;
+            currentReadingPosition = setReaderHorizontalOffset(contentEl, Math.min(position, scrollSize));
             updatePageIndicator();
         } else {
             contentEl.scrollTop = rawPosition;
             currentReadingPosition = rawPosition;
         }
         currentReadingPercentage = parseFloat(percentage);
+        currentReadingLocator = captureReaderLocation() || currentReadingLocator;
+        updateReaderProgressDisplay(currentReadingPercentage);
 
     } catch (error) {
         handleError(error, '跳转进度失败', ErrorLevel.ERROR);
     }
+}
+
+function updateReaderProgressDisplay(pct) {
+    const normalized = Math.max(0, Math.min(100, Number(pct) || 0));
+    const progressText = document.getElementById('reader-progress-text');
+    const progressSlider = document.getElementById('reader-progress-slider');
+    const posEl = document.getElementById('reader-position-text');
+    if (progressText) progressText.textContent = `${normalized.toFixed(1)}%`;
+    if (progressSlider) progressSlider.value = normalized;
+    if (posEl) posEl.textContent = `${normalized.toFixed(1)}%`;
+}
+
+function restoreReaderLocation(locator, percentage = 0, retryCount = 0, restoreToken = null, onSettled = null) {
+    const contentEl = document.getElementById('reader-content');
+    if (!contentEl) return;
+
+    const normalizedLocator = normalizeReadingLocator(locator) || currentReadingLocator;
+    const pct = Math.max(0, Math.min(100, parseFloat(percentage) || 0));
+
+    if (readerMode === 'page') {
+        const step = getReaderPageStep(contentEl);
+        const maxScroll = getReaderHorizontalMax(contentEl);
+
+        if (maxScroll <= 0 && retryCount < 10) {
+            setTimeout(() => {
+                if (restoreToken !== null && restoreToken !== readerRestoreToken) return;
+                restoreReaderLocation(normalizedLocator, percentage, retryCount + 1, restoreToken, onSettled);
+            }, 180);
+            return;
+        }
+
+        let targetPosition = null;
+
+        if (normalizedLocator?.pageIndex && step > 0) {
+            targetPosition = step * Math.max(0, normalizedLocator.pageIndex - 1);
+        }
+
+        if (targetPosition === null && Number.isFinite(normalizedLocator?.scrollLeft)) {
+            targetPosition = normalizedLocator.scrollLeft;
+        }
+
+        if (targetPosition === null && normalizedLocator?.paragraphIndex !== null && normalizedLocator?.paragraphIndex !== undefined) {
+            const paragraph = contentEl.querySelector(`[data-paragraph="${normalizedLocator.paragraphIndex}"]`);
+            if (paragraph) {
+                const containerRect = contentEl.getBoundingClientRect();
+                const paragraphRect = paragraph.getBoundingClientRect();
+                const absLeft = paragraphRect.left - containerRect.left + getReaderHorizontalOffset(contentEl);
+                targetPosition = step > 0 ? Math.floor(absLeft / step) * step : absLeft;
+            }
+        }
+
+        if (targetPosition === null) {
+            const rawPosition = maxScroll > 0 ? (maxScroll * (pct / 100)) : 0;
+            targetPosition = step > 0 ? Math.round(rawPosition / step) * step : rawPosition;
+        }
+
+        const unclampedTarget = Math.max(0, Math.round(targetPosition || 0));
+        if (unclampedTarget > maxScroll + Math.max(4, step * 0.35) && retryCount < 12) {
+            setTimeout(() => {
+                if (restoreToken !== null && restoreToken !== readerRestoreToken) return;
+                restoreReaderLocation(normalizedLocator, percentage, retryCount + 1, restoreToken, onSettled);
+            }, 220);
+            return;
+        }
+
+        targetPosition = Math.max(0, Math.min(maxScroll, unclampedTarget));
+        currentReadingPosition = setReaderHorizontalOffset(contentEl, targetPosition);
+
+        if (targetPosition > 0 && Math.abs(getReaderHorizontalOffset(contentEl) - targetPosition) > Math.max(2, step * 0.35) && retryCount < 10) {
+            setTimeout(() => {
+                if (restoreToken !== null && restoreToken !== readerRestoreToken) return;
+                restoreReaderLocation(normalizedLocator, percentage, retryCount + 1, restoreToken, onSettled);
+            }, 180);
+            return;
+        }
+    } else {
+        const maxScroll = Math.max(0, contentEl.scrollHeight - contentEl.clientHeight);
+        let targetPosition = null;
+
+        if (normalizedLocator?.paragraphIndex !== null && normalizedLocator?.paragraphIndex !== undefined) {
+            const paragraph = contentEl.querySelector(`[data-paragraph="${normalizedLocator.paragraphIndex}"]`);
+            if (paragraph) {
+                targetPosition = Math.max(0, paragraph.offsetTop - 12);
+            }
+        }
+
+        if (targetPosition === null && Number.isFinite(normalizedLocator?.scrollTop)) {
+            targetPosition = normalizedLocator.scrollTop;
+        }
+
+        if (targetPosition === null) {
+            targetPosition = maxScroll > 0 ? (maxScroll * (pct / 100)) : 0;
+        }
+
+        const unclampedTarget = Math.max(0, Math.round(targetPosition || 0));
+        if (unclampedTarget > maxScroll + 8 && retryCount < 12) {
+            setTimeout(() => {
+                if (restoreToken !== null && restoreToken !== readerRestoreToken) return;
+                restoreReaderLocation(normalizedLocator, percentage, retryCount + 1, restoreToken, onSettled);
+            }, 220);
+            return;
+        }
+
+        contentEl.scrollTop = Math.max(0, Math.min(maxScroll, unclampedTarget));
+        currentReadingPosition = contentEl.scrollTop;
+    }
+
+    currentReadingLocator = captureReaderLocation() || normalizedLocator;
+    currentReadingPercentage = pct;
+    updateReaderProgressDisplay(pct);
+    updatePageIndicator();
+    if (typeof onSettled === 'function') onSettled();
 }
 
 // 退出阅读器
@@ -16224,7 +17491,7 @@ async function exitReader() {
     clearTimeout(saveProgressTimer);
     if (currentBook) {
         try {
-            const saved = await persistReadingProgressNow();
+            const saved = await persistReadingProgressNow('exit-reader');
             if (saved) {
                 console.log(`[阅读器] 退出保存进度: ${saved.percentage}% (bookId=${currentBook.id})`);
             }
@@ -16232,6 +17499,10 @@ async function exitReader() {
             console.error('退出时保存进度失败:', e);
         }
     }
+
+    readerRestoreToken += 1;
+    isRestoringReaderLocation = false;
+    document.getElementById('reader-content')?.removeEventListener('scroll', saveReadingProgress);
 
     document.getElementById('reader-screen').style.display = 'none';
     document.body.classList.remove('no-scroll');
@@ -16323,8 +17594,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
     window.addEventListener('resize', () => {
         if (document.getElementById('reader-screen')?.style.display === 'flex') {
+            const locatorBeforeResize = captureReaderLocation();
             applyReaderMode();
-            restoreReadingPosition(currentReadingPercentage);
+            currentReadingLocator = locatorBeforeResize || currentReadingLocator;
+            restoreReaderLocation(currentReadingLocator, currentReadingPercentage);
             snapReaderToPage();
             updatePageIndicator();
         }
@@ -16456,11 +17729,13 @@ function openReaderFontSettings() {
 
 // 更新字体大小
 function updateReaderFontSize(size) {
+    const locatorBeforeLayout = captureReaderLocation();
     document.getElementById('reader-content').style.fontSize = size + 'px';
     document.getElementById('reader-font-size-display').textContent = size + 'px';
     if (readerMode === 'page') {
         applyReaderMode();
-        restoreReadingPosition(currentReadingPercentage);
+        currentReadingLocator = locatorBeforeLayout || currentReadingLocator;
+        restoreReaderLocation(currentReadingLocator, currentReadingPercentage);
         snapReaderToPage();
         updatePageIndicator();
     }
@@ -16468,11 +17743,13 @@ function updateReaderFontSize(size) {
 
 // 更新行间距
 function updateReaderLineHeight(height) {
+    const locatorBeforeLayout = captureReaderLocation();
     document.getElementById('reader-content').style.lineHeight = height;
     document.getElementById('reader-line-height-display').textContent = height;
     if (readerMode === 'page') {
         applyReaderMode();
-        restoreReadingPosition(currentReadingPercentage);
+        currentReadingLocator = locatorBeforeLayout || currentReadingLocator;
+        restoreReaderLocation(currentReadingLocator, currentReadingPercentage);
         snapReaderToPage();
         updatePageIndicator();
     }
@@ -16486,54 +17763,252 @@ function updateReaderModeButtons() {
     pageBtn.classList.toggle('active', readerMode === 'page');
 }
 
+function getReaderSidePadding(clientWidth) {
+    const width = Math.max(0, Math.round(clientWidth || 0));
+    if (width <= 0) return 24;
+    if (width <= 420) return Math.max(14, Math.min(20, Math.round(width * 0.045)));
+    if (width <= 900) return Math.max(18, Math.min(32, Math.round(width * 0.05)));
+    return Math.max(24, Math.min(56, Math.round(width * 0.08)));
+}
+
+function shouldUseInstantReaderPaging() {
+    try {
+        return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+            (navigator.maxTouchPoints || 0) > 0;
+    } catch (e) {
+        return (navigator.maxTouchPoints || 0) > 0;
+    }
+}
+
+function getReaderPageFlowElement(contentEl = document.getElementById('reader-content')) {
+    if (!contentEl) return null;
+    return contentEl.querySelector('.reader-page-flow');
+}
+
+function isReaderTransformPaging(contentEl = document.getElementById('reader-content')) {
+    return !!(readerUsesTransformPaging && readerMode === 'page' && getReaderPageFlowElement(contentEl));
+}
+
+function getReaderHorizontalMetrics(contentEl = document.getElementById('reader-content')) {
+    if (!contentEl) {
+        return { offset: 0, maxScroll: 0, flowEl: null };
+    }
+
+    const flowEl = isReaderTransformPaging(contentEl) ? getReaderPageFlowElement(contentEl) : null;
+    if (flowEl) {
+        const maxScroll = Math.max(0, (flowEl.scrollWidth || contentEl.clientWidth || 0) - (contentEl.clientWidth || 0));
+        const rawOffset = Number(contentEl.dataset.pageOffset || currentReadingPosition || 0);
+        const offset = Math.max(0, Math.min(maxScroll, Math.round(rawOffset)));
+        return { offset, maxScroll, flowEl };
+    }
+
+    const offset = Math.max(0, Math.round(contentEl.scrollLeft || 0));
+    const maxScroll = Math.max(0, (contentEl.scrollWidth || 0) - (contentEl.clientWidth || 0));
+    return { offset, maxScroll, flowEl: null };
+}
+
+function getReaderHorizontalOffset(contentEl = document.getElementById('reader-content')) {
+    return getReaderHorizontalMetrics(contentEl).offset;
+}
+
+function getReaderHorizontalMax(contentEl = document.getElementById('reader-content')) {
+    return getReaderHorizontalMetrics(contentEl).maxScroll;
+}
+
+function setReaderHorizontalOffset(contentEl, target) {
+    if (!contentEl) return 0;
+
+    const metrics = getReaderHorizontalMetrics(contentEl);
+    const normalized = Math.max(0, Math.min(metrics.maxScroll, Math.round(Number(target) || 0)));
+
+    if (metrics.flowEl) {
+        contentEl.dataset.pageOffset = String(normalized);
+        metrics.flowEl.style.transform = `translate3d(${-normalized}px, 0, 0)`;
+    } else {
+        contentEl.scrollLeft = normalized;
+    }
+
+    currentReadingPosition = normalized;
+    return normalized;
+}
+
+function measureReaderPageLayout(contentEl) {
+    if (!contentEl) return null;
+
+    const flowEl = isReaderTransformPaging(contentEl) ? getReaderPageFlowElement(contentEl) : null;
+    const layoutEl = flowEl || contentEl;
+    const computed = window.getComputedStyle(layoutEl);
+    const clientWidth = contentEl.clientWidth || contentEl.offsetWidth || 0;
+    const clientHeight = contentEl.clientHeight || contentEl.offsetHeight || 0;
+    const paddingLeft = parseFloat(computed.paddingLeft) || 0;
+    const paddingRight = parseFloat(computed.paddingRight) || 0;
+    const columnGap = parseFloat(computed.columnGap) || (paddingLeft + paddingRight);
+    const usableWidth = Math.max(0, clientWidth - paddingLeft - paddingRight);
+    const parsedColumnWidth = parseFloat(computed.columnWidth);
+    const columnWidth = Number.isFinite(parsedColumnWidth) && parsedColumnWidth > 0
+        ? parsedColumnWidth
+        : usableWidth;
+    const pageStep = Math.round(clientWidth || (columnWidth + columnGap));
+    const layoutHash = [
+        Math.round(clientWidth),
+        Math.round(clientHeight),
+        Math.round(columnWidth),
+        Math.round(columnGap),
+        Math.round(paddingLeft),
+        Math.round(paddingRight),
+        Math.round(parseFloat(computed.fontSize) || 0),
+        computed.lineHeight
+    ].join(':');
+
+    readerLayoutSnapshot = {
+        clientWidth,
+        clientHeight,
+        paddingLeft,
+        paddingRight,
+        columnGap,
+        usableWidth,
+        columnWidth,
+        pageStep,
+        layoutHash,
+        layoutVersion: `${READER_LAYOUT_VERSION}:${layoutHash}`
+    };
+    return readerLayoutSnapshot;
+}
+
+function getReaderPageCount(contentEl, step = getReaderPageStep(contentEl)) {
+    if (!contentEl || !step) return 1;
+    const maxScroll = getReaderHorizontalMax(contentEl);
+    return Math.max(1, Math.round(maxScroll / step) + 1);
+}
+
 function applyReaderMode() {
     const contentEl = document.getElementById('reader-content');
     if (!contentEl) return;
+    const flowEl = getReaderPageFlowElement(contentEl);
 
     if (readerMode === 'page') {
+        const useInstantPaging = shouldUseInstantReaderPaging();
+        const useTransformPaging = !!(useInstantPaging && flowEl);
         contentEl.classList.add('reader-page-mode');
 
         // 先清除旧的列布局样式，让浏览器回到自然状态再测量
         contentEl.style.columnWidth = '';
         contentEl.style.columnGap = '';
+        contentEl.style.columnFill = 'auto';
+        contentEl.style.webkitColumnFill = 'auto';
+        contentEl.style.columnCount = 'auto';
 
         const height = contentEl.clientHeight || contentEl.offsetHeight;
         const clientW = contentEl.clientWidth;
-
-        // 读取当前实际 padding
-        const computed = window.getComputedStyle(contentEl);
-        const paddingLeft = parseFloat(computed.paddingLeft) || 0;
-        const paddingRight = parseFloat(computed.paddingRight) || 0;
-        // 确保左右 padding 对称（取较大值并取整）
-        const sidePadding = Math.ceil(Math.max(paddingLeft, paddingRight));
+        const sidePadding = getReaderSidePadding(clientW);
         const totalPadding = sidePadding * 2;
         contentEl.style.paddingLeft = `${sidePadding}px`;
         contentEl.style.paddingRight = `${sidePadding}px`;
 
-        // 重新测量 clientWidth（padding 可能变了）
-        const finalClientW = contentEl.clientWidth;
-        // 列宽 = clientWidth - padding，确保 columnWidth + columnGap === clientWidth
-        const contentWidth = finalClientW - totalPadding;
+        const usableWidth = clientW - totalPadding;
 
-        if (contentWidth <= 10) {
+        if (usableWidth <= 10) {
             requestAnimationFrame(applyReaderMode);
             return;
         }
 
-        contentEl.style.columnWidth = `${contentWidth}px`;
-        contentEl.style.columnGap = `${totalPadding}px`;
         contentEl.style.height = height ? `${height}px` : '';
-        contentEl.style.overflowX = 'auto';
+        contentEl.style.overflowX = useInstantPaging ? 'hidden' : 'auto';
         contentEl.style.overflowY = 'hidden';
+        contentEl.style.overscrollBehaviorX = 'none';
+        contentEl.style.touchAction = useInstantPaging ? 'pan-y pinch-zoom' : 'auto';
+
+        if (useTransformPaging) {
+            contentEl.style.padding = '0';
+            flowEl.style.columnWidth = `${usableWidth}px`;
+            flowEl.style.columnGap = `${totalPadding}px`;
+            flowEl.style.columnFill = 'auto';
+            flowEl.style.webkitColumnFill = 'auto';
+            flowEl.style.columnCount = 'auto';
+            flowEl.style.width = `${Math.round(clientW)}px`;
+            flowEl.style.minWidth = `${Math.round(clientW)}px`;
+            flowEl.style.height = height ? `${height}px` : '';
+            flowEl.style.padding = `20px ${sidePadding}px 24px`;
+            flowEl.style.boxSizing = 'border-box';
+            flowEl.style.overflow = 'visible';
+            flowEl.style.willChange = 'transform';
+            flowEl.style.transform = `translate3d(${-Math.max(0, Math.round(Number(contentEl.dataset.pageOffset || currentReadingPosition || 0)))}px, 0, 0)`;
+        } else {
+            contentEl.style.paddingTop = '20px';
+            contentEl.style.paddingRight = `${sidePadding}px`;
+            contentEl.style.paddingBottom = '20px';
+            contentEl.style.paddingLeft = `${sidePadding}px`;
+            contentEl.style.columnWidth = `${usableWidth}px`;
+            contentEl.style.columnGap = `${totalPadding}px`;
+            if (flowEl) {
+                flowEl.style.transform = '';
+                flowEl.style.width = '';
+                flowEl.style.minWidth = '';
+                flowEl.style.height = '';
+                flowEl.style.padding = '';
+                flowEl.style.boxSizing = '';
+                flowEl.style.overflow = '';
+                flowEl.style.willChange = '';
+                flowEl.style.columnWidth = '';
+                flowEl.style.columnGap = '';
+                flowEl.style.columnFill = '';
+                flowEl.style.webkitColumnFill = '';
+                flowEl.style.columnCount = '';
+            }
+        }
+
+        readerLayoutSnapshot = {
+            clientWidth: Math.round(clientW),
+            clientHeight: Math.round(height || contentEl.clientHeight || contentEl.offsetHeight || 0),
+            paddingLeft: sidePadding,
+            paddingRight: sidePadding,
+            columnGap: totalPadding,
+            usableWidth,
+            columnWidth: usableWidth,
+            pageStep: Math.round(clientW),
+            layoutHash: [
+                Math.round(clientW),
+                Math.round(height || contentEl.clientHeight || contentEl.offsetHeight || 0),
+                usableWidth,
+                totalPadding,
+                sidePadding,
+                sidePadding,
+                Math.round(parseFloat(window.getComputedStyle(contentEl).fontSize) || 0),
+                window.getComputedStyle(contentEl).lineHeight
+            ].join(':'),
+            layoutVersion: ''
+        };
+        readerLayoutSnapshot.layoutVersion = `${READER_LAYOUT_VERSION}:${readerLayoutSnapshot.layoutHash}`;
     } else {
         contentEl.classList.remove('reader-page-mode');
         contentEl.style.columnWidth = '';
         contentEl.style.columnGap = '';
+        contentEl.style.columnFill = '';
+        contentEl.style.webkitColumnFill = '';
+        contentEl.style.columnCount = '';
         contentEl.style.height = '';
-        contentEl.style.paddingLeft = '32px';
-        contentEl.style.paddingRight = '32px';
+        contentEl.style.padding = '20px 32px';
         contentEl.style.overflowX = 'hidden';
         contentEl.style.overflowY = 'auto';
+        contentEl.style.overscrollBehaviorX = '';
+        contentEl.style.touchAction = '';
+        delete contentEl.dataset.pageOffset;
+        if (flowEl) {
+            flowEl.style.transform = '';
+            flowEl.style.width = '';
+            flowEl.style.minWidth = '';
+            flowEl.style.height = '';
+            flowEl.style.padding = '';
+            flowEl.style.boxSizing = '';
+            flowEl.style.overflow = '';
+            flowEl.style.willChange = '';
+            flowEl.style.columnWidth = '';
+            flowEl.style.columnGap = '';
+            flowEl.style.columnFill = '';
+            flowEl.style.webkitColumnFill = '';
+            flowEl.style.columnCount = '';
+        }
+        readerLayoutSnapshot = null;
     }
 
     updateReaderModeButtons();
@@ -16541,10 +18016,13 @@ function applyReaderMode() {
 
 function getReaderPageStep(contentEl) {
     if (!contentEl) return 0;
-    // 设计上 columnWidth + columnGap === clientWidth，
-    // 直接用 clientWidth 作为步长最可靠，不受浏览器列宽微调影响
-    const width = contentEl.clientWidth || contentEl.offsetWidth || 0;
-    return width > 0 ? width : 0;
+    const shouldRemeasure = !readerLayoutSnapshot ||
+        Math.abs((readerLayoutSnapshot.clientWidth || 0) - (contentEl.clientWidth || 0)) > 1 ||
+        Math.abs((readerLayoutSnapshot.clientHeight || 0) - (contentEl.clientHeight || 0)) > 1;
+    const layout = shouldRemeasure ? measureReaderPageLayout(contentEl) : readerLayoutSnapshot;
+    return layout && layout.pageStep > 0
+        ? layout.pageStep
+        : (contentEl.clientWidth || contentEl.offsetWidth || 0);
 }
 
 function updatePageIndicator() {
@@ -16559,8 +18037,8 @@ function updatePageIndicator() {
     if (contentEl) {
         const step = getReaderPageStep(contentEl);
         if (step) {
-            const pageCount = Math.max(1, Math.ceil(contentEl.scrollWidth / step));
-            const pageIndex = Math.min(pageCount, Math.max(1, Math.round(contentEl.scrollLeft / step) + 1));
+            const pageCount = getReaderPageCount(contentEl, step);
+            const pageIndex = Math.min(pageCount, Math.max(1, Math.round(getReaderHorizontalOffset(contentEl) / step) + 1));
             currentReadingPage = pageIndex;
             currentReadingPageCount = pageCount;
         }
@@ -16569,27 +18047,65 @@ function updatePageIndicator() {
     indicator.textContent = `第 ${currentReadingPage} / ${currentReadingPageCount} 页`;
 }
 
+function alignReaderToPage(contentEl, desiredTarget = null) {
+    if (!contentEl || readerMode !== 'page') return 0;
+    const step = getReaderPageStep(contentEl);
+    if (!step) return 0;
+
+    const maxScroll = getReaderHorizontalMax(contentEl);
+    let target = desiredTarget === null || desiredTarget === undefined
+        ? Math.round(getReaderHorizontalOffset(contentEl) / step) * step
+        : Math.round(desiredTarget / step) * step;
+    target = Math.round(target);
+    if (target < 0) target = 0;
+    if (target > maxScroll) target = maxScroll;
+
+    currentReadingPosition = setReaderHorizontalOffset(contentEl, target);
+    if (shouldUseInstantReaderPaging()) {
+        requestAnimationFrame(() => {
+            if (readerMode !== 'page' || !contentEl.isConnected) return;
+            if (Math.abs(getReaderHorizontalOffset(contentEl) - target) > 0.5) {
+                currentReadingPosition = setReaderHorizontalOffset(contentEl, target);
+            }
+        });
+    }
+
+    const pageCount = getReaderPageCount(contentEl, step);
+    const pageIndex = Math.min(pageCount, Math.max(1, Math.round(target / step) + 1));
+    currentReadingPage = pageIndex;
+    currentReadingPageCount = pageCount;
+    updatePageIndicator();
+    return target;
+}
+
 function turnReaderPage(direction) {
     const contentEl = document.getElementById('reader-content');
     if (!contentEl || readerMode !== 'page') return;
     const step = getReaderPageStep(contentEl);
     if (!step) return;
-    const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
-    const current = contentEl.scrollLeft;
+    const maxScroll = getReaderHorizontalMax(contentEl);
+    const current = getReaderHorizontalOffset(contentEl);
     const base = step > 0 ? Math.round(current / step) * step : current;
     let target = Math.round(base + (direction === 'prev' ? -step : step));
     if (target < 0) target = 0;
     if (target > maxScroll) target = maxScroll;
+
+    const useInstantPaging = shouldUseInstantReaderPaging();
+    if (useInstantPaging) {
+        alignReaderToPage(contentEl, target);
+        saveReadingProgress();
+        return;
+    }
+
+    isSnappingPage = true;
     contentEl.scrollTo({ left: target, behavior: 'smooth' });
     currentReadingPosition = target;
-    if (step) {
-        const pageCount = Math.max(1, Math.ceil(contentEl.scrollWidth / step));
-        const pageIndex = Math.min(pageCount, Math.max(1, Math.round(target / step) + 1));
-        currentReadingPage = pageIndex;
-        currentReadingPageCount = pageCount;
-        updatePageIndicator();
-    }
-    saveReadingProgress();
+    updatePageIndicator();
+    setTimeout(() => {
+        alignReaderToPage(contentEl, target);
+        isSnappingPage = false;
+        saveReadingProgress();
+    }, 260);
 }
 
 function snapReaderToPage() {
@@ -16598,16 +18114,24 @@ function snapReaderToPage() {
     if (!contentEl) return;
     const step = getReaderPageStep(contentEl);
     if (!step) return;
-    const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
-    let target = Math.round(contentEl.scrollLeft / step) * step;
-    target = Math.round(target); // 整数像素
-    if (target < 0) target = 0;
-    if (target > maxScroll) target = maxScroll;
-    if (Math.abs(contentEl.scrollLeft - target) < 1) return;
+    const current = getReaderHorizontalOffset(contentEl);
+    const target = Math.round(current / step) * step;
+    if (Math.abs(current - target) < 1) return;
+
+    const useInstantPaging = isRestoringReaderLocation || shouldUseInstantReaderPaging();
+    if (useInstantPaging) {
+        alignReaderToPage(contentEl, target);
+        return;
+    }
+
     isSnappingPage = true;
     contentEl.scrollTo({ left: target, behavior: 'smooth' });
     currentReadingPosition = target;
-    setTimeout(() => { isSnappingPage = false; }, 180);
+    setTimeout(() => {
+        alignReaderToPage(contentEl, target);
+        isSnappingPage = false;
+        saveReadingProgress();
+    }, 240);
     updatePageIndicator();
 }
 
@@ -16615,15 +18139,7 @@ function hardSnapReaderToPage() {
     if (readerMode !== 'page') return;
     const contentEl = document.getElementById('reader-content');
     if (!contentEl) return;
-    const step = getReaderPageStep(contentEl);
-    if (!step) return;
-    const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
-    let target = Math.round(contentEl.scrollLeft / step) * step;
-    if (target < 0) target = 0;
-    if (target > maxScroll) target = maxScroll;
-    contentEl.scrollLeft = target;
-    currentReadingPosition = target;
-    updatePageIndicator();
+    alignReaderToPage(contentEl);
     saveReadingProgress();
     if (typeof showToast === 'function') {
         showToast('✅ 已强制对齐页面');
@@ -16644,64 +18160,29 @@ function persistReaderMode() {
 }
 
 function restoreReadingPosition(percentage, _retryCount) {
-    const contentEl = document.getElementById('reader-content');
-    if (!contentEl) return;
-    const pct = Math.max(0, Math.min(100, parseFloat(percentage) || 0));
-    const retryCount = _retryCount || 0;
-
-    if (readerMode === 'page') {
-        const step = getReaderPageStep(contentEl);
-        const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
-
-        let targetPosition = 0;
-        if (step && currentReadingPage && currentReadingPage > 1) {
-            targetPosition = step * (currentReadingPage - 1);
-        } else if (step > 0 && pct > 0) {
-            const rawPosition = maxScroll > 0 ? (maxScroll * (pct / 100)) : 0;
-            targetPosition = Math.round(rawPosition / step) * step;
-        }
-
-        targetPosition = Math.min(targetPosition, maxScroll);
-
-        // 如果目标位置 > 0 但 maxScroll 太小（列布局未完成），延迟重试
-        if (targetPosition > 0 && maxScroll < targetPosition && retryCount < 10) {
-            setTimeout(() => restoreReadingPosition(percentage, retryCount + 1), 200);
-            return;
-        }
-
-        contentEl.scrollLeft = targetPosition;
-        currentReadingPosition = contentEl.scrollLeft;
-
-        // 验证是否真的滚动成功，否则重试
-        if (targetPosition > 0 && Math.abs(contentEl.scrollLeft - targetPosition) > step * 0.5 && retryCount < 10) {
-            setTimeout(() => restoreReadingPosition(percentage, retryCount + 1), 200);
-            return;
-        }
-    } else {
-        const scrollHeight = contentEl.scrollHeight - contentEl.clientHeight;
-        const position = scrollHeight > 0 ? (scrollHeight * (pct / 100)) : 0;
-        contentEl.scrollTop = position;
-        currentReadingPosition = position;
-    }
-
-    // 同步更新进度显示
-    const progressText = document.getElementById('reader-progress-text');
-    const progressSlider = document.getElementById('reader-progress-slider');
-    const posEl = document.getElementById('reader-position-text');
-    if (progressText) progressText.textContent = `${pct.toFixed(1)}%`;
-    if (progressSlider) progressSlider.value = pct;
-    if (posEl) posEl.textContent = `${pct.toFixed(1)}%`;
+    restoreReaderLocation(currentReadingLocator, percentage, _retryCount || 0);
 }
 
 // 设置阅读模式
 function setReaderMode(mode) {
     if (mode !== 'scroll' && mode !== 'page') return;
+    const locatorBeforeSwitch = captureReaderLocation();
     readerMode = mode;
     persistReaderMode();
-    applyReaderMode();
-    restoreReadingPosition(currentReadingPercentage);
-    snapReaderToPage();
-    updatePageIndicator();
+    currentReadingLocator = locatorBeforeSwitch || currentReadingLocator;
+    const needsRerender = shouldUseInstantReaderPaging() || !!getReaderPageFlowElement();
+    if (needsRerender) {
+        renderReaderContent();
+    } else {
+        applyReaderMode();
+        restoreReaderLocation(currentReadingLocator, currentReadingPercentage);
+        snapReaderToPage();
+        updatePageIndicator();
+    }
+    clearTimeout(saveProgressTimer);
+    persistReadingProgressNow('switch-mode').catch(e => {
+        console.error('[阅读器] 切换模式后保存进度失败:', e);
+    });
 }
 
 // 悬浮窗菜单
@@ -17294,49 +18775,233 @@ async function addNoteToSelection() {
     }
 }
 
+function buildReaderLocationLabel(payload) {
+    const parts = [];
+    if (payload?.pageIndex) parts.push(`第 ${payload.pageIndex} 页`);
+    if (payload?.paragraphIndex !== null && payload?.paragraphIndex !== undefined) {
+        parts.push(`段落 ${Number(payload.paragraphIndex) + 1}`);
+    }
+    return parts.join(' · ');
+}
+
+async function buildReaderSharePayload(sourceType, rawData = {}) {
+    let book = rawData.book || null;
+    if (!book && rawData.bookId !== undefined && rawData.bookId !== null) {
+        book = await dbHelper.safeGet('libraryBooks', rawData.bookId, '书籍');
+    }
+    if (!book && currentBook && (rawData.bookId === undefined || String(rawData.bookId) === String(currentBook.id))) {
+        book = currentBook;
+    }
+
+    const isCurrentSourceBook = !!book && !!currentBook && String(book.id) === String(currentBook.id);
+    const liveLocator = isCurrentSourceBook ? (captureReaderLocation() || currentReadingLocator) : null;
+    const explicitLocator = normalizeReadingLocator(rawData.readingLocator || rawData.locatorData || null);
+    const fallbackParagraphIndex = rawData.paragraphIndex !== undefined && rawData.paragraphIndex !== null
+        ? Number(rawData.paragraphIndex)
+        : null;
+
+    const locator = explicitLocator ||
+        liveLocator ||
+        normalizeReadingLocator(book?.readingLocator) ||
+        normalizeReadingLocator({
+            mode: rawData.mode || book?.readerMode || readerMode,
+            pageIndex: rawData.pageIndex || null,
+            pageCount: rawData.pageCount || null,
+            scrollLeft: rawData.scrollLeft || null,
+            scrollTop: rawData.scrollTop || null,
+            paragraphIndex: Number.isFinite(fallbackParagraphIndex) ? fallbackParagraphIndex : null,
+            locator: Number.isFinite(fallbackParagraphIndex)
+                ? `p:${fallbackParagraphIndex}`
+                : (rawData.pageIndex ? `page:${rawData.pageIndex}` : null),
+            updatedAt: Date.now()
+        });
+
+    const payload = {
+        source: 'reader',
+        sourceType,
+        bookId: book?.id ?? rawData.bookId ?? currentBook?.id ?? null,
+        bookTitle: book?.title || rawData.bookTitle || currentBook?.title || '未知书籍',
+        chapterId: locator?.chapterId || null,
+        pageIndex: locator?.pageIndex ?? (Number.isFinite(Number(rawData.pageIndex)) ? Number(rawData.pageIndex) : null),
+        locator: locator?.locator || null,
+        paragraphIndex: locator?.paragraphIndex ?? (Number.isFinite(fallbackParagraphIndex) ? fallbackParagraphIndex : null),
+        excerpt: (rawData.excerpt || rawData.selectionText || rawData.content || '').trim(),
+        noteId: rawData.noteId ?? rawData.id ?? null,
+        userNote: rawData.userNote || null,
+        createdAt: Date.now(),
+        readingLocator: locator,
+        book
+    };
+    payload.locationLabel = buildReaderLocationLabel(payload);
+    return payload;
+}
+
+function getCurrentReaderShareTarget() {
+    if (!currentChatCharacter) return null;
+
+    if (currentReadingRoom) {
+        return {
+            type: 'current-chat',
+            key: `reading-room:${currentReadingRoom.id}`,
+            label: `当前聊天：阅读室 ${currentReadingRoom.name}`,
+            description: currentReadingRoom.bookId ? '正在聊天中' : ''
+        };
+    }
+
+    const chatName = currentCharacterSession?.name || currentEditingCharacter?.name || currentChatCharacter?.name || '当前聊天';
+    return {
+        type: 'current-chat',
+        key: currentCharacterSession ? `character-session:${currentCharacterSession.id}` : `character:${currentEditingCharacter?.id || 'current'}`,
+        label: `当前聊天：${chatName}`,
+        description: '直接把摘录放进当前输入框'
+    };
+}
+
+function sortReaderShareRooms(rooms) {
+    const recent = store.readerShareRecentTarget || null;
+    return (rooms || []).slice().sort((a, b) => {
+        const aPinned = recent?.type === 'reading-room' && String(recent.roomId) === String(a.id) ? 1 : 0;
+        const bPinned = recent?.type === 'reading-room' && String(recent.roomId) === String(b.id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        return (b.lastActiveDate || 0) - (a.lastActiveDate || 0);
+    });
+}
+
+function rememberReaderShareTarget(target) {
+    if (!target) return;
+
+    if (target.type === 'reading-room') {
+        store.readerShareRecentTarget = {
+            type: 'reading-room',
+            roomId: target.roomId,
+            updatedAt: Date.now()
+        };
+    } else {
+        store.readerShareRecentTarget = {
+            type: target.type,
+            key: target.key || null,
+            updatedAt: Date.now()
+        };
+    }
+    saveData();
+}
+
+function applyReaderShareQuote(payload) {
+    setExcerptQuote(payload.bookTitle, payload.excerpt, payload.userNote, {
+        locationLabel: payload.locationLabel,
+        locator: payload.locator,
+        pageIndex: payload.pageIndex,
+        paragraphIndex: payload.paragraphIndex
+    });
+    document.getElementById('character-chat-input')?.focus();
+}
+
+async function openReaderTargetPicker(payload) {
+    const options = [];
+    const currentTarget = getCurrentReaderShareTarget();
+    if (currentTarget) {
+        options.push(currentTarget);
+    }
+
+    const rooms = sortReaderShareRooms(await dbHelper.safeToArray('readingRooms', '阅读室'));
+    const bookTitleMap = {};
+    const roomBookIds = [...new Set((rooms || []).map(room => room.bookId).filter(id => id !== undefined && id !== null))];
+    for (const roomBookId of roomBookIds) {
+        const roomBook = await dbHelper.safeGet('libraryBooks', roomBookId, '书籍');
+        bookTitleMap[String(roomBookId)] = roomBook?.title || '未知书籍';
+    }
+
+    for (const room of rooms) {
+        if (currentReadingRoom && String(currentReadingRoom.id) === String(room.id)) {
+            continue;
+        }
+        const roomBookTitle = bookTitleMap[String(room.bookId)] || '未知书籍';
+        options.push({
+            type: 'reading-room',
+            roomId: room.id,
+            room,
+            label: `阅读室：${room.name}`,
+            description: String(room.bookId) === String(payload.bookId) ? '同书目标' : `来自《${roomBookTitle}》`
+        });
+    }
+
+    if (payload.book) {
+        options.push({
+            type: 'new-reading-room',
+            label: `新建阅读室：${payload.bookTitle}`,
+            description: '为来源书籍创建新的阅读室'
+        });
+    }
+
+    if (options.length === 0) {
+        alert('当前没有可发送目标');
+        return null;
+    }
+
+    const optionLines = options.map((option, index) => {
+        const desc = option.description ? ` (${option.description})` : '';
+        return `${index + 1}. ${option.label}${desc}`;
+    }).join('\n');
+
+    const choice = prompt(`选择发送目标：\n\n${optionLines}\n\n取消即可放弃发送。`, '1');
+    if (!choice) return null;
+
+    const index = parseInt(choice, 10) - 1;
+    if (Number.isNaN(index) || index < 0 || index >= options.length) {
+        alert('无效序号');
+        return null;
+    }
+
+    return options[index];
+}
+
+async function routeReaderSharePayload(payload) {
+    const target = await openReaderTargetPicker(payload);
+    if (!target) return false;
+
+    if (target.type === 'current-chat') {
+        applyReaderShareQuote(payload);
+        rememberReaderShareTarget(target);
+        return true;
+    }
+
+    if (target.type === 'reading-room') {
+        const keepCurrentBook = !!currentBook && !!payload.book && String(currentBook.id) === String(payload.book.id);
+        await openReadingRoom(target.roomId, keepCurrentBook);
+        setTimeout(() => {
+            applyReaderShareQuote(payload);
+        }, 450);
+        rememberReaderShareTarget(target);
+        return true;
+    }
+
+    if (target.type === 'new-reading-room') {
+        const roomId = await createReadingRoomForBook(payload.book || currentBook, { openAfterCreate: true });
+        if (roomId) {
+            setTimeout(() => {
+                applyReaderShareQuote(payload);
+            }, 450);
+            rememberReaderShareTarget({ type: 'reading-room', roomId });
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // 发送选中文字到聊天室
 async function sendSelectionToChat() {
     const selectedText = window.getSelection().toString().trim();
     if (!selectedText || !currentBook) return;
 
     textSelectionToolbar.classList.remove('active');
-
-    // 获取当前书籍的阅读室列表
-    const allRooms = await dbHelper.safeToArray('readingRooms', '阅读室');
-    const bookRooms = allRooms ? allRooms.filter(r => r.bookId === currentBook.id) : [];
-
-    if (bookRooms.length === 0) {
-        if (confirm(`《${currentBook.title}》还没有阅读室。\n\n要创建一个吗？`)) {
-            await createReadingRoomFromReader();
-            // 创建后设置摘录引用
-            if (currentReadingRoom) {
-                setExcerptQuote(currentBook.title, selectedText);
-            }
-        }
-        return;
-    }
-
-    // 打开阅读室后设置摘录引用
-    const openRoomAndSetExcerpt = async (roomId) => {
-        await openReadingRoom(roomId);
-        setTimeout(() => {
-            setExcerptQuote(currentBook.title, selectedText);
-            document.getElementById('character-chat-input')?.focus();
-        }, 500);
-    };
-
-    if (bookRooms.length === 1) {
-        await openRoomAndSetExcerpt(bookRooms[0].id);
-    } else {
-        // 多个阅读室，让用户选择
-        const roomNames = bookRooms.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
-        const choice = prompt(`选择要发送到的阅读室:\n\n${roomNames}\n\n请输入序号:`, '1');
-        if (!choice) return;
-
-        const idx = parseInt(choice) - 1;
-        if (idx >= 0 && idx < bookRooms.length) {
-            await openRoomAndSetExcerpt(bookRooms[idx].id);
-        }
+    const payload = await buildReaderSharePayload('selection', {
+        book: currentBook,
+        excerpt: selectedText
+    });
+    const sent = await routeReaderSharePayload(payload);
+    if (sent) {
+        window.getSelection().removeAllRanges();
     }
 }
 
@@ -17421,12 +19086,11 @@ function goToBookmark(position, percentage = 0, mode = 'scroll') {
 
     if (readerMode === 'page') {
         if (mode === 'page') {
-            contentEl.scrollLeft = position || 0;
+            currentReadingPosition = setReaderHorizontalOffset(contentEl, position || 0);
         } else {
-            const scrollWidth = contentEl.scrollWidth - contentEl.clientWidth;
-            contentEl.scrollLeft = scrollWidth * (percentage / 100);
+            const scrollWidth = getReaderHorizontalMax(contentEl);
+            currentReadingPosition = setReaderHorizontalOffset(contentEl, scrollWidth * (percentage / 100));
         }
-        currentReadingPosition = contentEl.scrollLeft;
         snapReaderToPage();
         updatePageIndicator();
     } else {
@@ -17534,14 +19198,13 @@ function scrollToParagraph(paragraphIndex) {
                 // 避免 offsetLeft 受 offsetParent 不同导致的偏差
                 const containerRect = contentEl.getBoundingClientRect();
                 const paragraphRect = paragraph.getBoundingClientRect();
-                const absLeft = paragraphRect.left - containerRect.left + contentEl.scrollLeft;
+                const absLeft = paragraphRect.left - containerRect.left + getReaderHorizontalOffset(contentEl);
                 // 对齐到最近的页面边界（step 的整数倍）
                 const pageIndex = Math.max(0, Math.floor(absLeft / step));
                 let target = pageIndex * step;
-                const maxScroll = Math.max(0, contentEl.scrollWidth - contentEl.clientWidth);
+                const maxScroll = getReaderHorizontalMax(contentEl);
                 target = Math.min(target, maxScroll);
-                contentEl.scrollLeft = target;
-                currentReadingPosition = target;
+                currentReadingPosition = setReaderHorizontalOffset(contentEl, target);
             }
             updatePageIndicator();
             saveReadingProgress();
@@ -17605,9 +19268,9 @@ function updateReaderProgressModal() {
     const contentEl = document.getElementById('reader-content');
     if (contentEl) {
         const scrollSize = readerMode === 'page'
-            ? (contentEl.scrollWidth - contentEl.clientWidth)
+            ? getReaderHorizontalMax(contentEl)
             : (contentEl.scrollHeight - contentEl.clientHeight);
-        const currentPos = readerMode === 'page' ? contentEl.scrollLeft : contentEl.scrollTop;
+        const currentPos = readerMode === 'page' ? getReaderHorizontalOffset(contentEl) : contentEl.scrollTop;
         percentage = scrollSize > 0 ? (currentPos / scrollSize * 100).toFixed(1) : 0;
     }
     const slider = document.getElementById('reader-progress-modal-slider');
@@ -17957,51 +19620,19 @@ async function sendNoteToChat(noteId = null) {
         }
     }
 
-    // 设置摘录引用（不自动发送，用户可继续输入）
-    const setupQuoteAndFocus = () => {
-        setExcerptQuote(bookTitle, excerpt || note.content, userNote || undefined);
-        const input = document.getElementById('character-chat-input');
-        if (input) input.focus();
-    };
+    const payload = await buildReaderSharePayload(note.type === 'highlight' ? 'highlight' : 'note', {
+        book,
+        bookId: note.bookId,
+        bookTitle,
+        excerpt: excerpt || note.content || '',
+        noteId: note.id,
+        userNote: userNote || undefined,
+        paragraphIndex: note.paragraphIndex,
+        pageIndex: note.pageIndex,
+        readingLocator: note.readingLocator || null
+    });
 
-    // 优先发送到当前聊天
-    if (currentChatCharacter) {
-        const sameBook = !currentReadingRoom || currentReadingRoom.bookId === note.bookId;
-        if (sameBook || confirm('当前聊天与该书籍不一致，仍要发送吗？')) {
-            setupQuoteAndFocus();
-            return;
-        }
-    }
-
-    // 读取对应书籍的阅读室列表
-    const rooms = await db.readingRooms.where('bookId').equals(note.bookId).toArray();
-    if (rooms && rooms.length > 0) {
-        const roomNames = rooms.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
-        const choice = prompt(`选择要发送到的阅读室:\n\n${roomNames}\n\n请输入序号:`, '1');
-        if (!choice) return;
-        const idx = parseInt(choice) - 1;
-        if (idx >= 0 && idx < rooms.length) {
-            await openReadingRoom(rooms[idx].id);
-            setTimeout(() => setupQuoteAndFocus(), 500);
-        }
-        return;
-    }
-
-    // 没有阅读室，尝试发送到普通聊天
-    const characters = await db.characters.toArray();
-    if (!characters || characters.length === 0) {
-        alert('没有可发送的聊天室，请先创建角色或阅读室');
-        return;
-    }
-    const charNames = characters.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
-    const cChoice = prompt(`选择要发送到的角色聊天:\n\n${charNames}\n\n请输入序号:`, '1');
-    if (!cChoice) return;
-    const cIdx = parseInt(cChoice) - 1;
-    if (cIdx >= 0 && cIdx < characters.length) {
-        currentEditingCharacter = characters[cIdx];
-        openCharacterChat();
-        setTimeout(() => setupQuoteAndFocus(), 500);
-    }
+    await routeReaderSharePayload(payload);
 }
 
 async function loadBookMemoryEntries() {
@@ -18296,12 +19927,26 @@ async function openReadingRoom(roomId, keepCurrentBook = false) {
         const id = parseInt(roomId);
         console.log('[阅读室] 打开 ID:', id);
 
+        const readerVisible = document.getElementById('reader-screen')?.style.display === 'flex';
+        if (readerVisible && currentBook) {
+            clearTimeout(saveProgressTimer);
+            try {
+                await persistReadingProgressNow('open-reading-room');
+            } catch (persistError) {
+                console.warn('[阅读器] 进入阅读室前保存进度失败:', persistError);
+            }
+        }
+
         const room = await dbHelper.safeGet('readingRooms', id, '阅读室');
         if (!room) {
             alert('阅读室不存在');
             return;
         }
 
+        // 切换前先保存当前会话/阅读室状态，防止消息丢失
+        if ((currentCharacterSession || currentReadingRoom) && currentChatCharacter) {
+            await saveCurrentChatState();
+        }
         // 阅读室模式与角色会话模式互斥，避免上下文串线
         currentCharacterSession = null;
         if (typeof closeCharacterSessionSidebar === 'function') closeCharacterSessionSidebar();
@@ -18354,8 +19999,8 @@ async function openReadingRoom(roomId, keepCurrentBook = false) {
         // 创建角色的工作副本，使用阅读室的聊天历史和阅读室自己的长期记忆
         currentChatCharacter = {
             ...character,
-            chatHistory: room.chatHistory,
-            longTermMemory: Array.isArray(room.longTermMemory) ? room.longTermMemory : []
+            chatHistory: [...(room.chatHistory || [])],
+            longTermMemory: [...(Array.isArray(room.longTermMemory) ? room.longTermMemory : [])]
         };
 
         // 设置聊天界面
@@ -18448,14 +20093,16 @@ function getCurrentVisibleParagraphIndex() {
     if (paragraphs.length === 0) return 0;
 
     if (readerMode === 'page') {
-        // 翻页模式：通过 scrollLeft 和页宽计算
-        const viewLeft = contentEl.scrollLeft;
+        // 翻页模式：用真实视口位置计算，避免 CSS 多列下 offsetLeft 漂移
+        const viewLeft = getReaderHorizontalOffset(contentEl);
         const viewRight = viewLeft + contentEl.clientWidth;
         const viewCenter = (viewLeft + viewRight) / 2;
         let closest = 0;
         let closestDist = Infinity;
         paragraphs.forEach(p => {
-            const pCenter = p.offsetLeft + p.offsetWidth / 2;
+            const containerRect = contentEl.getBoundingClientRect();
+            const paragraphRect = p.getBoundingClientRect();
+            const pCenter = paragraphRect.left - containerRect.left + getReaderHorizontalOffset(contentEl) + (paragraphRect.width / 2);
             const dist = Math.abs(pCenter - viewCenter);
             if (dist < closestDist) {
                 closestDist = dist;

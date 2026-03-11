@@ -193,6 +193,20 @@
                     </svg></span>
                 <span>云端同步</span>
             </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('task-center')">
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
+                        <path d="M9 11l3 3L22 4"></path>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg></span>
+                <span>任务中心</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('notifications')">
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                    </svg></span>
+                <span>通知设置</span>
+            </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('data-manager')">
                 <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
                         <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
@@ -2087,6 +2101,28 @@
         </div>
     </div>
 
+    <div id="panel-notifications" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header"
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">🔔 通知设置</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <div id="notify-permission-status" style="margin-bottom:15px; padding:10px; border-radius:8px; background:var(--card-bg); font-size:0.85rem;"></div>
+            <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="margin-bottom:0;">启用推送通知</label>
+                <input type="checkbox" id="notify-enabled" onchange="toggleNotifications()">
+            </div>
+            <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="margin-bottom:0;">任务执行通知</label>
+                <input type="checkbox" id="notify-task-delivery" checked>
+            </div>
+            <button class="btn" onclick="saveNotifySettings()">保存设置</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
     <div id="panel-background-activity" class="sidebar-panel modal">
         <div class="sheet">
             <div class="header"
@@ -2389,6 +2425,89 @@
     </div>
 
     <!-- MCP 工具管理面板 -->
+    <!-- Task Center Panel (Phase 5.6-C) -->
+    <div id="panel-task-center" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">&#8249;</span>
+                <h3 style="margin:0;">任务中心</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <p style="font-size:0.8rem; opacity:0.7; margin-bottom:15px;">管理定时任务与主动消息推送。任务会自动投递到指定角色的会话窗口。</p>
+
+            <!-- Filter tabs -->
+            <div id="task-filter-tabs" style="display:flex; gap:6px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn-sec task-filter-btn active" data-filter="all" onclick="filterTasks('all')" style="padding:4px 10px; font-size:0.75rem;">全部</button>
+                <button class="btn-sec task-filter-btn" data-filter="enabled" onclick="filterTasks('enabled')" style="padding:4px 10px; font-size:0.75rem;">启用中</button>
+                <button class="btn-sec task-filter-btn" data-filter="disabled" onclick="filterTasks('disabled')" style="padding:4px 10px; font-size:0.75rem;">已停用</button>
+                <button class="btn-sec task-filter-btn" data-filter="failed" onclick="filterTasks('failed')" style="padding:4px 10px; font-size:0.75rem;">失败</button>
+            </div>
+
+            <!-- Task list -->
+            <div id="task-center-list" style="margin-bottom:20px;">
+                <div style="text-align:center; opacity:0.5; padding:20px;">加载中...</div>
+            </div>
+
+            <button class="btn" onclick="openTaskEditor()">+ 新建任务</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <!-- Task Editor Modal -->
+    <div id="modal-task-editor" class="modal modal-on-top">
+        <div class="sheet" style="max-width:500px; margin:auto;">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closeModal('modal-task-editor')">&#8249;</span>
+                <h3 id="task-editor-title" style="margin:0;">新建任务</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <div class="input-group">
+                <label>任务名称</label>
+                <input type="text" id="task-editor-name" placeholder="例：早间科技趋势推送">
+            </div>
+            <div class="input-group">
+                <label>任务类型</label>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-sec task-type-btn active" data-type="one_time" onclick="selectTaskType('one_time')">一次性</button>
+                    <button class="btn btn-sec task-type-btn" data-type="scheduled" onclick="selectTaskType('scheduled')">定时</button>
+                </div>
+            </div>
+            <div id="task-schedule-group" class="input-group" style="display:none;">
+                <label>Cron 表达式</label>
+                <input type="text" id="task-editor-cron" placeholder="0 8 * * * (每天8点)">
+                <div style="font-size:0.7rem; opacity:0.5; margin-top:4px;">格式：分 时 日 月 周 | 例：0 8 * * * = 每天8:00, */30 * * * * = 每30分钟</div>
+            </div>
+            <div class="input-group">
+                <label>目标角色</label>
+                <select id="task-editor-character" onchange="loadTaskEditorSessions()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                    <option value="">选择角色...</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>目标会话</label>
+                <select id="task-editor-session" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                    <option value="">选择会话...</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>系统提示词 (可选)</label>
+                <textarea id="task-editor-system-prompt" rows="3" placeholder="给 AI 的系统指令..." style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical;"></textarea>
+            </div>
+            <div class="input-group">
+                <label>任务消息</label>
+                <textarea id="task-editor-message" rows="3" placeholder="发送给 AI 的内容..." style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical;"></textarea>
+            </div>
+            <div class="input-group">
+                <div style="display:flex; align-items:center; justify-content:space-between;">
+                    <label style="margin:0;">启用</label>
+                    <input type="checkbox" id="task-editor-enabled" checked style="width:auto;">
+                </div>
+            </div>
+            <button class="btn" style="margin-top:15px;" onclick="saveTask()">保存</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-task-editor')">取消</button>
+        </div>
+    </div>
+
     <div id="panel-mcp-manager" class="sidebar-panel modal">
         <div class="sheet">
             <div class="header"
