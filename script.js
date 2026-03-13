@@ -3996,6 +3996,9 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
         console.log(`[AI调用] 使用最近 ${recentHistory.length}/${currentChatCharacter.chatHistory.length} 条消息作为上下文`);
 
+        const visionAllowed = isVisionModel(store.apiConfig.main.model, detectAIProvider(store.apiConfig.main.url));
+        let removedImages = false;
+
         const messages = recentHistory.map(msg => {
             // 构建消息内容（支持引用）
             let textContent = msg.content;
@@ -4032,19 +4035,26 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
                 // Clean text by removing all image markdown
                 const cleanText = textContent.replace(imgRegex, '').trim();
-                contentParts.push({ type: "text", text: cleanText || "Images uploaded" });
+                const omissionNote = '[Image omitted: model not vision-capable]';
+                const textForModel = cleanText
+                    ? (visionAllowed ? cleanText : `${cleanText}\n${omissionNote}`)
+                    : (visionAllowed ? 'Images uploaded' : omissionNote);
+                contentParts.push({ type: "text", text: textForModel });
 
-                // Add all images
-                matches.forEach(match => {
-                    let imageUrl = match[1];
-                    if (imageUrl.startsWith('/api/files/')) {
-                        imageUrl = window.location.origin + imageUrl;
-                    }
-                    contentParts.push({
-                        type: "image_url",
-                        image_url: { url: imageUrl }
+                if (visionAllowed) {
+                    matches.forEach(match => {
+                        let imageUrl = match[1];
+                        if (imageUrl.startsWith('/api/files/')) {
+                            imageUrl = window.location.origin + imageUrl;
+                        }
+                        contentParts.push({
+                            type: "image_url",
+                            image_url: { url: imageUrl }
+                        });
                     });
-                });
+                } else {
+                    removedImages = true;
+                }
 
                 return {
                     role: msg.role,
@@ -4053,6 +4063,10 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             }
             return { role: msg.role, content: textContent };
         });
+
+        if (removedImages) {
+            updateChatStatus('已自动移除图片（模型非视觉）', 'info');
+        }
 
         const apiUrl = store.apiConfig.main.url.endsWith('/')
             ? store.apiConfig.main.url + 'chat/completions'
@@ -4120,6 +4134,7 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             let accThinking = '';
             let streamDoneData = null;
             let _toolGroupCounter = 0;
+            const thinkParser = createThinkParser();
 
             // Helper: create a new segment bubble in the container
             function _createSegmentBubble(isFirst) {
@@ -4161,6 +4176,21 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
             updateChatStatus('思考中...', 'thinking');
 
+            function _renderThinking() {
+                if (!currentBubbleId) _createSegmentBubble(true);
+                const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
+                if (thinkEl) {
+                    thinkEl.style.display = 'block';
+                    thinkEl.innerHTML = `
+                        <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            💭 思考中...
+                            <span class="thinking-toggle">▼</span>
+                        </div>
+                        <div class="thinking-body">${escapeHtml(accThinking)}</div>
+                    `;
+                }
+            }
+
             const streamResult = await callAIViaProxy(proxyMessages, proxyConfig, currentChatCharacter?.id, {
                 stream: true,
                 maxToolRounds: store.maxToolRounds || 10,
@@ -4169,75 +4199,28 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                         case 'thinking':
                             if (data.text) {
                                 accThinking += data.text;
-                                // Ensure first segment exists for thinking
-                                if (!currentBubbleId) _createSegmentBubble(true);
-                                const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
-                                if (thinkEl) {
-                                    thinkEl.style.display = 'block';
-                                    thinkEl.innerHTML = `
-                                        <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                                            💭 思考中...
-                                            <span class="thinking-toggle">▼</span>
-                                        </div>
-                                        <div class="thinking-body">${escapeHtml(accThinking)}</div>
-                                    `;
-                                }
+                                _renderThinking();
                                 updateChatStatus('深度思考中...', 'thinking');
                             }
                             break;
 
                         case 'text':
                             if (data.text) {
-                                // Create bubble if needed (first text or after round_start)
-                                if (!currentBubbleId) _createSegmentBubble(segments.length === 0);
-
-                                const currentSeg = segments[segments.length - 1];
-                                currentSeg.accText += data.text;
-
-                                // Handle inline <think> tags (Qwen-style)
-                                let displayText = currentSeg.accText;
-                                const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
-                                const thinkMatch = displayText.match(/<think>([\s\S]*?)<\/think>/g);
-                                if (thinkMatch) {
-                                    thinkMatch.forEach(m => {
-                                        const inner = m.replace(/<\/?think>/g, '');
-                                        if (inner.trim() && thinkEl) {
-                                            accThinking = inner;
-                                            thinkEl.style.display = 'block';
-                                            thinkEl.innerHTML = `
-                                                <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                                                    💭 思考中...
-                                                    <span class="thinking-toggle">▼</span>
-                                                </div>
-                                                <div class="thinking-body">${escapeHtml(accThinking)}</div>
-                                            `;
-                                        }
-                                        displayText = displayText.replace(m, '');
-                                    });
+                                const parsed = thinkParser.process(data.text);
+                                if (parsed.thinkingText) {
+                                    accThinking += parsed.thinkingText;
+                                    _renderThinking();
+                                    updateChatStatus('深度思考中...', 'thinking');
                                 }
-                                // Handle unclosed <think>
-                                if (displayText.includes('<think>') && !displayText.includes('</think>')) {
-                                    const thinkIdx = displayText.indexOf('<think>');
-                                    const thinkPart = displayText.substring(thinkIdx + 7);
-                                    displayText = displayText.substring(0, thinkIdx);
-                                    if (thinkPart.trim() && thinkEl) {
-                                        accThinking = thinkPart;
-                                        thinkEl.style.display = 'block';
-                                        thinkEl.innerHTML = `
-                                            <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                                                💭 思考中...
-                                                <span class="thinking-toggle">▼</span>
-                                            </div>
-                                            <div class="thinking-body">${escapeHtml(accThinking)}</div>
-                                        `;
-                                        updateChatStatus('深度思考中...', 'thinking');
-                                    }
+                                if (parsed.displayText) {
+                                    if (!currentBubbleId) _createSegmentBubble(segments.length === 0);
+                                    const currentSeg = segments[segments.length - 1];
+                                    currentSeg.accText += parsed.displayText;
+                                    const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                    if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText.trim());
+                                    if (parsed.displayText.trim()) updateChatStatus('回复中...', 'thinking');
+                                    container.scrollTop = container.scrollHeight;
                                 }
-
-                                const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
-                                if (textEl) textEl.innerHTML = renderMarkdown(displayText.trim());
-                                if (displayText.trim()) updateChatStatus('回复中...', 'thinking');
-                                container.scrollTop = container.scrollHeight;
                             }
                             break;
 
@@ -4304,6 +4287,40 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                             break;
 
                         case 'done':
+                            if (data && data.fallback) {
+                                updateChatStatus('已回退到非流式', 'info');
+                            }
+                            const flushed = thinkParser.flush();
+                            if (flushed.thinkingText) {
+                                accThinking += flushed.thinkingText;
+                                _renderThinking();
+                            }
+                            if (flushed.displayText) {
+                                if (!currentBubbleId) _createSegmentBubble(segments.length === 0);
+                                const currentSeg = segments[segments.length - 1];
+                                currentSeg.accText += flushed.displayText;
+                                const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText.trim());
+                            }
+                            const hasAnyText = segments.some(s => s.accText && s.accText.trim());
+                            if (data && data.content && !hasAnyText) {
+                                const doneParser = createThinkParser();
+                                const doneParsed = doneParser.process(data.content);
+                                const doneFlushed = doneParser.flush();
+                                const doneDisplay = (doneParsed.displayText || '') + (doneFlushed.displayText || '');
+                                const doneThinking = (doneParsed.thinkingText || '') + (doneFlushed.thinkingText || '');
+                                if (doneThinking) {
+                                    accThinking += doneThinking;
+                                    _renderThinking();
+                                }
+                                if (doneDisplay) {
+                                    if (!currentBubbleId) _createSegmentBubble(true);
+                                    const currentSeg = segments[segments.length - 1];
+                                    currentSeg.accText += doneDisplay;
+                                    const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                    if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText.trim());
+                                }
+                            }
                             streamDoneData = data;
                             break;
 
@@ -6182,6 +6199,21 @@ async function triggerAiAssistantResponse() {
 
             updateAiChatStatus('Vesper 正在思考...', 'thinking', 0);
 
+            function _renderVesperThinking() {
+                if (!currentBubbleId) _createVesperSegmentBubble(true);
+                const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
+                if (thinkEl) {
+                    thinkEl.style.display = 'block';
+                    thinkEl.innerHTML = `
+                        <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+                            💭 思考中...
+                            <span class="thinking-toggle">▼</span>
+                        </div>
+                        <div class="thinking-body">${escapeHtml(accThinking)}</div>
+                    `;
+                }
+            }
+
             // Build full Vesper system prompt (same logic as non-stream callAI)
             const _vsNow = new Date();
             const _vsLocal = new Date(_vsNow.getTime() + 8 * 3600 * 1000);
@@ -6290,31 +6322,28 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
                         case 'thinking':
                             if (data.text) {
                                 accThinking += data.text;
-                                if (!currentBubbleId) _createVesperSegmentBubble(true);
-                                const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
-                                if (thinkEl) {
-                                    thinkEl.style.display = 'block';
-                                    thinkEl.innerHTML = `
-                                        <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                                            💭 思考中...
-                                            <span class="thinking-toggle">▼</span>
-                                        </div>
-                                        <div class="thinking-body">${escapeHtml(accThinking)}</div>
-                                    `;
-                                }
+                                _renderVesperThinking();
                                 updateAiChatStatus('深度思考中...', 'thinking', 0);
                             }
                             break;
 
                         case 'text':
                             if (data.text) {
-                                if (!currentBubbleId) _createVesperSegmentBubble(segments.length === 0);
-                                const currentSeg = segments[segments.length - 1];
-                                currentSeg.accText += data.text;
-                                const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
-                                if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText);
-                                updateAiChatStatus('回复中...', 'thinking', 0);
-                                chatContainer.scrollTop = chatContainer.scrollHeight;
+                                const parsed = thinkParser.process(data.text);
+                                if (parsed.thinkingText) {
+                                    accThinking += parsed.thinkingText;
+                                    _renderVesperThinking();
+                                    updateAiChatStatus('深度思考中...', 'thinking', 0);
+                                }
+                                if (parsed.displayText) {
+                                    if (!currentBubbleId) _createVesperSegmentBubble(segments.length === 0);
+                                    const currentSeg = segments[segments.length - 1];
+                                    currentSeg.accText += parsed.displayText;
+                                    const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                    if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText);
+                                    updateAiChatStatus('回复中...', 'thinking', 0);
+                                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                                }
                             }
                             break;
 
@@ -6378,6 +6407,40 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
                             break;
 
                         case 'done':
+                            if (data && data.fallback) {
+                                updateAiChatStatus('已回退到非流式', 'info', 2000);
+                            }
+                            const flushed = thinkParser.flush();
+                            if (flushed.thinkingText) {
+                                accThinking += flushed.thinkingText;
+                                _renderVesperThinking();
+                            }
+                            if (flushed.displayText) {
+                                if (!currentBubbleId) _createVesperSegmentBubble(segments.length === 0);
+                                const currentSeg = segments[segments.length - 1];
+                                currentSeg.accText += flushed.displayText;
+                                const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText);
+                            }
+                            const hasAnyText = segments.some(s => s.accText && s.accText.trim());
+                            if (data && data.content && !hasAnyText) {
+                                const doneParser = createThinkParser();
+                                const doneParsed = doneParser.process(data.content);
+                                const doneFlushed = doneParser.flush();
+                                const doneDisplay = (doneParsed.displayText || '') + (doneFlushed.displayText || '');
+                                const doneThinking = (doneParsed.thinkingText || '') + (doneFlushed.thinkingText || '');
+                                if (doneThinking) {
+                                    accThinking += doneThinking;
+                                    _renderVesperThinking();
+                                }
+                                if (doneDisplay) {
+                                    if (!currentBubbleId) _createVesperSegmentBubble(true);
+                                    const currentSeg = segments[segments.length - 1];
+                                    currentSeg.accText += doneDisplay;
+                                    const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                    if (textEl) textEl.innerHTML = renderMarkdown(currentSeg.accText);
+                                }
+                            }
                             streamDoneData = data;
                             break;
 
@@ -7840,6 +7903,91 @@ function detectAIProvider(apiUrl) {
     return 'openai';
 }
 
+function isVisionModel(model, provider) {
+    if (!model) return false;
+    const m = String(model).toLowerCase();
+    if (m.includes('vision') || m.includes('vl') || m.includes('4v') || m.includes('multimodal')) return true;
+    if (m.includes('gpt-4o') || m.includes('gpt-4.1') || m.includes('gpt-4-turbo')) return true;
+    if (m.includes('gemini-1.5') || m.includes('gemini-2.0')) return true;
+    if (m.includes('claude-3')) return true;
+    return false;
+}
+
+function createThinkParser() {
+    let inThink = false;
+    let carry = '';
+
+    function findPartialTagStart(str, tag) {
+        const end = str.length;
+        const maxLen = Math.min(tag.length - 1, end);
+        for (let len = maxLen; len > 0; len--) {
+            if (str.slice(end - len) === tag.slice(0, len)) {
+                return end - len;
+            }
+        }
+        return -1;
+    }
+
+    function process(chunk) {
+        if (!chunk) return { displayText: '', thinkingText: '' };
+        let input = carry + chunk;
+        carry = '';
+        let displayText = '';
+        let thinkingText = '';
+        let i = 0;
+
+        while (i < input.length) {
+            if (!inThink) {
+                const startIdx = input.indexOf('<think>', i);
+                if (startIdx === -1) {
+                    const partial = findPartialTagStart(input.slice(i), '<think>');
+                    if (partial !== -1) {
+                        const absStart = i + partial;
+                        displayText += input.slice(i, absStart);
+                        carry = input.slice(absStart);
+                    } else {
+                        displayText += input.slice(i);
+                    }
+                    break;
+                }
+                displayText += input.slice(i, startIdx);
+                i = startIdx + 7;
+                inThink = true;
+            } else {
+                const endIdx = input.indexOf('</think>', i);
+                if (endIdx === -1) {
+                    const partial = findPartialTagStart(input.slice(i), '</think>');
+                    if (partial !== -1) {
+                        const absStart = i + partial;
+                        thinkingText += input.slice(i, absStart);
+                        carry = input.slice(absStart);
+                    } else {
+                        thinkingText += input.slice(i);
+                    }
+                    break;
+                }
+                thinkingText += input.slice(i, endIdx);
+                i = endIdx + 8;
+                inThink = false;
+            }
+        }
+
+        return { displayText, thinkingText };
+    }
+
+    function flush() {
+        if (!carry) return { displayText: '', thinkingText: '' };
+        const leftover = carry;
+        carry = '';
+        if (inThink) {
+            return { displayText: '', thinkingText: leftover };
+        }
+        return { displayText: leftover, thinkingText: '' };
+    }
+
+    return { process, flush };
+}
+
 // Phase 5.6-A: structured card send stub
 async function sendStructuredCard(cardType, payload, target) {
     const token = localStorage.getItem('lifeos_auth_token');
@@ -9094,6 +9242,9 @@ async function callAI(userMessage) {
         });
     }
 
+    const visionAllowed = isVisionModel(config.model, detectAIProvider(config.url));
+    let removedImages = false;
+
     const messages = [
         {
             role: 'system', content: `你叫 Vesper。你是 "Tara's LifeOS" 的核心 AI 助理。
@@ -9193,19 +9344,26 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
                 const contentParts = [];
                 // Clean text by removing all image markdown
                 const cleanText = textContent.replace(imgRegex, '').trim();
-                contentParts.push({ type: "text", text: cleanText || "Images uploaded" });
+                const omissionNote = '[Image omitted: model not vision-capable]';
+                const textForModel = cleanText
+                    ? (visionAllowed ? cleanText : `${cleanText}\n${omissionNote}`)
+                    : (visionAllowed ? 'Images uploaded' : omissionNote);
+                contentParts.push({ type: "text", text: textForModel });
 
-                // Add all images
-                matches.forEach(match => {
-                    let imageUrl = match[1];
-                    if (imageUrl.startsWith('/api/files/')) {
-                        imageUrl = window.location.origin + imageUrl;
-                    }
-                    contentParts.push({
-                        type: "image_url",
-                        image_url: { url: imageUrl }
+                if (visionAllowed) {
+                    matches.forEach(match => {
+                        let imageUrl = match[1];
+                        if (imageUrl.startsWith('/api/files/')) {
+                            imageUrl = window.location.origin + imageUrl;
+                        }
+                        contentParts.push({
+                            type: "image_url",
+                            image_url: { url: imageUrl }
+                        });
                     });
-                });
+                } else {
+                    removedImages = true;
+                }
 
                 return {
                     role: msg.role,
@@ -9217,6 +9375,10 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
         // [Vesper Fix] 动态时间注入 - 每次发送时强制更新当前时间
         { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
     ];
+
+    if (removedImages) {
+        updateAiChatStatus('已自动移除图片（模型非视觉）', 'info', 2000);
+    }
 
     try {
         // Try server-side AI proxy first (supports tool calling)
@@ -11857,6 +12019,8 @@ function openSidebarPanel(panelId) {
                 loadTaskCenter();
             } else if (panelId === 'notifications') {
                 loadNotifyPanel();
+            } else if (panelId === 'memory-index') {
+                loadMemoryIndexPanel();
             }
         }
     }, 100);
@@ -20700,3 +20864,185 @@ const _emojiObserver = new MutationObserver(mutations => {
 _emojiObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
 console.log('[LifeOS] Emoji→SVG 图标系统已加载');
+
+
+// ==================== Memory Index Management ====================
+
+let miCurrentPage = 1;
+const MI_PAGE_SIZE = 30;
+
+async function loadMemoryIndexPanel() {
+    // Load character list for dropdown
+    try {
+        const resp = await fetch('/api/memory/index/characters', {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            const select = document.getElementById('mi-character-select');
+            // Preserve current selection
+            const currentVal = select.value;
+            select.innerHTML = '<option value="">全部角色</option>';
+            for (const ch of data.characters) {
+                const opt = document.createElement('option');
+                opt.value = ch.id;
+                opt.textContent = ch.name + ' (' + ch.count + ')';
+                select.appendChild(opt);
+            }
+            if (currentVal) select.value = currentVal;
+        }
+    } catch (e) {
+        console.warn('[MemoryIndex] Failed to load characters:', e);
+    }
+
+    // Load stats
+    try {
+        const resp = await fetch('/api/memory/index/stats', {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            document.getElementById('mi-total-count').textContent = '总计: ' + data.total + ' 条';
+            document.getElementById('mi-avg-imp').textContent = '平均权重: ' + data.avgImportance;
+        }
+    } catch (e) {}
+
+    miCurrentPage = 1;
+    loadMemoryIndex();
+}
+
+async function loadMemoryIndex() {
+    const characterId = document.getElementById('mi-character-select').value;
+    const search = document.getElementById('mi-search').value.trim();
+    const list = document.getElementById('mi-list');
+
+    list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-secondary);">加载中...</div>';
+
+    try {
+        let url = '/api/memory/index?page=' + miCurrentPage + '&limit=' + MI_PAGE_SIZE;
+        if (characterId) url += '&character_id=' + encodeURIComponent(characterId);
+        if (search) url += '&q=' + encodeURIComponent(search);
+
+        const resp = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+        const data = await resp.json();
+        renderMemoryIndexList(data.entries);
+
+        // Pagination
+        document.getElementById('mi-page-info').textContent = data.page + ' / ' + (data.totalPages || 1);
+        document.getElementById('mi-prev').disabled = data.page <= 1;
+        document.getElementById('mi-next').disabled = data.page >= data.totalPages;
+
+        // Show batch bar
+        document.getElementById('mi-batch-bar').style.display = data.entries.length > 0 ? 'flex' : 'none';
+        document.getElementById('mi-select-all').checked = false;
+        miUpdateSelectedCount();
+    } catch (e) {
+        list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--danger, red);">加载失败: ' + e.message + '</div>';
+    }
+}
+
+function renderMemoryIndexList(entries) {
+    const list = document.getElementById('mi-list');
+    if (!entries || entries.length === 0) {
+        list.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-secondary);">暂无记忆索引数据</div>';
+        return;
+    }
+
+    list.innerHTML = entries.map(e => {
+        const impPercent = Math.round((e.importance || 0) * 100);
+        const impColor = impPercent >= 60 ? 'var(--accent, #4fc3f7)' : impPercent >= 30 ? 'var(--text-secondary)' : 'var(--text-secondary)';
+        const ts = e.timestamp || e.created_at || '';
+        const shortTs = ts.length > 16 ? ts.substring(0, 16) : ts;
+
+        return '<div class="mi-entry" data-id="' + e.id + '" style="padding:10px; margin-bottom:6px; border-radius:8px; background:var(--card-bg); border:1px solid var(--border); position:relative;">'
+            + '<div style="display:flex; align-items:flex-start; gap:8px;">'
+            + '<input type="checkbox" class="mi-check" data-id="' + e.id + '" onchange="miUpdateSelectedCount()" style="margin-top:3px;">'
+            + '<div style="flex:1; min-width:0;">'
+            + '<div style="font-size:0.9rem; line-height:1.4; word-break:break-word;">' + escapeHtml(e.content) + '</div>'
+            + '<div style="display:flex; gap:10px; margin-top:4px; font-size:0.75rem; color:var(--text-secondary);">'
+            + '<span style="color:' + impColor + ';">权重 ' + (e.importance !== null ? e.importance : '--') + '</span>'
+            + '<span>' + shortTs + '</span>'
+            + '</div>'
+            + '</div>'
+            + '<button onclick="miDeleteEntry(' + e.id + ', this)" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:2px 6px; font-size:1.1rem;" title="删除">×</button>'
+            + '</div>'
+            + '</div>';
+    }).join('');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function miPrevPage() {
+    if (miCurrentPage > 1) {
+        miCurrentPage--;
+        loadMemoryIndex();
+    }
+}
+
+function miNextPage() {
+    miCurrentPage++;
+    loadMemoryIndex();
+}
+
+function miToggleSelectAll() {
+    const checked = document.getElementById('mi-select-all').checked;
+    document.querySelectorAll('.mi-check').forEach(cb => cb.checked = checked);
+    miUpdateSelectedCount();
+}
+
+function miUpdateSelectedCount() {
+    const checked = document.querySelectorAll('.mi-check:checked').length;
+    const el = document.getElementById('mi-selected-count');
+    if (el) el.textContent = '已选 ' + checked + ' 条';
+}
+
+async function miDeleteEntry(id, btn) {
+    if (!confirm('确定删除这条记忆？')) return;
+    try {
+        const resp = await fetch('/api/memory/index/' + id, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        });
+        if (resp.ok) {
+            // Remove from DOM
+            const entry = btn.closest('.mi-entry');
+            if (entry) entry.remove();
+        } else {
+            alert('删除失败');
+        }
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+async function miDeleteSelected() {
+    const ids = Array.from(document.querySelectorAll('.mi-check:checked')).map(cb => parseInt(cb.dataset.id));
+    if (ids.length === 0) return;
+    if (!confirm('确定删除选中的 ' + ids.length + ' 条记忆？')) return;
+
+    try {
+        const resp = await fetch('/api/memory/index', {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Bearer ' + localStorage.getItem('token'),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ ids })
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            loadMemoryIndex(); // Reload
+        } else {
+            alert('批量删除失败');
+        }
+    } catch (e) {
+        alert('批量删除失败: ' + e.message);
+    }
+}

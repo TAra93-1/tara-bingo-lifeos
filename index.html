@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tara's LifeOS Chronos BinGO</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#1a1a1a">
     <script>
@@ -33,26 +34,26 @@
         rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <!-- Markdown-it CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.1/dist/markdown-it.min.js"></script>
+    <script src="./vendor/markdown-it.min.js"></script>
 
     <!-- KaTeX for LaTeX math rendering -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <link rel="stylesheet" href="./vendor/katex.min.css">
+    <script src="./vendor/katex.min.js"></script>
 
     <!-- Dexie.js for IndexedDB -->
-    <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.min.js"></script>
+    <script src="./vendor/dexie.min.js"></script>
 
     <!-- Cloud sync API layer (must be after Dexie, before script.js) -->
     <script src="api-layer.js"></script>
 
     <!-- Chart.js for data visualization -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+    <script src="./vendor/chart.umd.js"></script>
 
     <!-- Pako for gzip compression (cloud backup) -->
-    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+    <script src="./vendor/pako.min.js"></script>
 
     <!-- Canvas Confetti -->
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script src="./vendor/confetti.browser.min.js"></script>
 </head>
 
 <body>
@@ -206,6 +207,13 @@
                         <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
                     </svg></span>
                 <span>通知设置</span>
+            </div>
+            <div class="sidebar-menu-item" onclick="openSidebarPanel('memory-index')">
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
+                        <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"></path>
+                        <circle cx="12" cy="6" r="1.5"></circle>
+                    </svg></span>
+                <span>记忆索引</span>
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('data-manager')">
                 <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
@@ -3442,8 +3450,58 @@
             <button id="character-session-sidebar-create" class="btn" style="width:100%; margin:0;">+ 新建会话</button>
         </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.88/dist/epub.min.js"></script>
+    
+    <!-- 记忆索引管理面板 -->
+    <div id="panel-memory-index" class="sidebar-panel modal">
+        <div class="sheet" style="max-width:600px;">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <span class="back-btn" onclick="closePanelBack()">‹</span>
+                <h3 style="margin:0;">记忆索引</h3>
+                <span style="width:30px;"></span>
+            </div>
+
+            <!-- Stats bar -->
+            <div id="mi-stats" style="display:flex; gap:12px; margin-bottom:12px; font-size:0.8rem; color:var(--text-secondary);">
+                <span id="mi-total-count">总计: --</span>
+                <span id="mi-avg-imp">平均权重: --</span>
+            </div>
+
+            <!-- Character selector -->
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <select id="mi-character-select" onchange="loadMemoryIndex()" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                    <option value="">全部角色</option>
+                </select>
+                <button class="btn btn-sec" onclick="loadMemoryIndex()" style="padding:8px 12px; font-size:0.85rem;">刷新</button>
+            </div>
+
+            <!-- Search -->
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <input type="text" id="mi-search" placeholder="搜索记忆内容..." style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);" onkeydown="if(event.key==='Enter')loadMemoryIndex()">
+                <button class="btn btn-sec" onclick="loadMemoryIndex()" style="padding:8px 12px; font-size:0.85rem;">搜索</button>
+            </div>
+
+            <!-- Batch actions -->
+            <div id="mi-batch-bar" style="display:none; margin-bottom:10px; padding:8px; border-radius:8px; background:var(--card-bg); display:flex; align-items:center; gap:8px;">
+                <label style="font-size:0.8rem; margin:0; display:flex; align-items:center; gap:4px;">
+                    <input type="checkbox" id="mi-select-all" onchange="miToggleSelectAll()"> 全选
+                </label>
+                <span id="mi-selected-count" style="font-size:0.8rem; color:var(--text-secondary);">已选 0 条</span>
+                <button class="btn" style="margin-left:auto; padding:4px 10px; font-size:0.8rem; background:var(--danger, #e74c3c);" onclick="miDeleteSelected()">删除选中</button>
+            </div>
+
+            <!-- Memory list -->
+            <div id="mi-list" style="max-height:55vh; overflow-y:auto; margin-bottom:12px;"></div>
+
+            <!-- Pagination -->
+            <div id="mi-pagination" style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:0.85rem;">
+                <button class="btn btn-sec" id="mi-prev" onclick="miPrevPage()" style="padding:4px 12px;" disabled>上一页</button>
+                <span id="mi-page-info">1 / 1</span>
+                <button class="btn btn-sec" id="mi-next" onclick="miNextPage()" style="padding:4px 12px;" disabled>下一页</button>
+            </div>
+        </div>
+    </div>
+    <script src="./vendor/jszip.min.js"></script>
+    <script src="./vendor/epub.min.js"></script>
     <script src="script.js"></script>
 </body>
 
