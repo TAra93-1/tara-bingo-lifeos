@@ -500,7 +500,8 @@ let store = {
     apiConfig: {
         main: { url: '', key: '', model: 'gpt-4', temperature: 0.8 },
         sub: { url: '', key: '', model: 'gpt-3.5-turbo', temperature: 0.8 },
-        search: { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' }
+        search: { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' },
+        vision: { enabled: false, url: '', key: '', model: 'gpt-4o-mini' }
     },
     aiChatHistory: [],
     aiConversations: [], // AI助手对话窗口列表 {id, name, history[], createdAt, updatedAt}
@@ -511,7 +512,8 @@ let store = {
         paragraphsBefore: 3,   // 当前位置前取几个段落
         paragraphsAfter: 5,    // 当前位置后取几个段落
         maxChars: 3000         // 最大字符数上限
-    }
+    },
+    readerVisionCache: {}
 };
 
 let viewDate = new Date();
@@ -543,6 +545,303 @@ const DIFF_CONFIG = {
     'hard': { line: 20, board: 100 },
     'hell': { line: 50, board: 300 }
 };
+
+function createDefaultSearchConfig() {
+    return { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' };
+}
+
+function createDefaultVisionApiConfig() {
+    return { enabled: false, url: '', key: '', model: 'gpt-4o-mini' };
+}
+
+function normalizeVisionApiConfig(rawConfig) {
+    const defaults = createDefaultVisionApiConfig();
+    const raw = (rawConfig && typeof rawConfig === 'object') ? rawConfig : {};
+    return {
+        ...defaults,
+        ...raw,
+        enabled: raw.enabled === true
+    };
+}
+
+function ensureApiConfigShape(apiConfig) {
+    const raw = (apiConfig && typeof apiConfig === 'object') ? apiConfig : {};
+    return {
+        ...raw,
+        main: {
+            url: '',
+            key: '',
+            model: 'gpt-4',
+            temperature: 0.8,
+            ...(raw.main || {})
+        },
+        sub: {
+            url: '',
+            key: '',
+            model: 'gpt-3.5-turbo',
+            temperature: 0.8,
+            ...(raw.sub || {})
+        },
+        search: {
+            ...createDefaultSearchConfig(),
+            ...(raw.search || {})
+        },
+        vision: normalizeVisionApiConfig(raw.vision)
+    };
+}
+
+function ensureReaderVisionCacheShape(cache) {
+    return (cache && typeof cache === 'object' && !Array.isArray(cache)) ? cache : {};
+}
+
+// ==================== Model Registry ====================
+
+/**
+ * 根据 sourceInputId 反查对应的 baseUrl
+ */
+function _getBaseUrlForInput(sourceInputId) {
+    const mapping = {
+        'main-api-model': 'main-api-url',
+        'sub-api-model': 'sub-api-url',
+        'vision-api-model': 'vision-api-url'
+    };
+    const urlInputId = mapping[sourceInputId];
+    if (urlInputId) {
+        const el = document.getElementById(urlInputId);
+        if (el) return el.value.trim();
+    }
+    return '';
+}
+
+/**
+ * 归一化 baseUrl（去尾斜杠、去 /chat/completions）
+ */
+function _normalizeBaseUrl(url) {
+    if (!url) return '';
+    return url.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
+}
+
+/**
+ * 构建 registry key: normalizedBaseUrl|modelId
+ */
+function _buildRegistryKey(modelId, baseUrl) {
+    const norm = _normalizeBaseUrl(baseUrl);
+    if (!norm) return modelId;
+    return norm + '|' + modelId;
+}
+
+/**
+ * 自动初判模型能力（启发式）
+ */
+function _autoDetectModelCapabilities(modelId) {
+    return {
+        supportsVision: /vision|vl|4v|multimodal|gpt-4o|gpt-4\.1|gpt-4-turbo|gemini-[1-9]|claude-[3-9]|claude-\w+-[3-9]|glm-4.*v/i.test(modelId),
+        supportsReasoning: /reasoning|r1|think|o1|o3|o4/i.test(modelId),
+        supportsTools: /gpt-4|gpt-3\.5|claude|gemini|glm-4|qwen/i.test(modelId),
+        supportsTemperature: true,
+        supportsTopP: true,
+        inputText: true,
+        inputImage: /vision|vl|4v|multimodal|gpt-4o|gpt-4\.1|gpt-4-turbo|gemini-[1-9]|claude-[3-9]|claude-\w+-[3-9]|glm-4.*v/i.test(modelId),
+        outputText: true,
+        outputImage: /dall-e|imagen|stable/i.test(modelId)
+    };
+}
+
+/**
+ * 获取模型的完整能力配置。
+ * 优先级：手动覆盖 > 自动检测
+ * 查找顺序：先查 baseUrl|modelId，再查纯 modelId（兼容旧数据）
+ */
+function getModelCapabilities(modelId, baseUrl) {
+    if (!modelId) return { ..._autoDetectModelCapabilities(''), source: 'auto' };
+    const registry = store.modelRegistry || {};
+    const fullKey = _buildRegistryKey(modelId, baseUrl);
+    const manual = registry[fullKey] || (fullKey !== modelId ? registry[modelId] : null);
+    const auto = _autoDetectModelCapabilities(modelId);
+
+    if (!manual) return { ...auto, source: 'auto' };
+
+    // 手动覆盖优先，未设定的字段 fallback 到自动检测
+    const merged = { ...auto };
+    for (const key of Object.keys(auto)) {
+        if (manual[key] !== undefined && manual[key] !== null) {
+            merged[key] = manual[key];
+        }
+    }
+    merged.displayName = manual.displayName || modelId;
+    merged.notes = manual.notes || '';
+    merged.source = 'manual';
+    return merged;
+}
+
+/**
+ * 保存模型能力到 registry（带 baseUrl 区分）
+ */
+function saveModelCapabilities(modelId, caps, baseUrl) {
+    if (!modelId) return;
+    if (!store.modelRegistry) store.modelRegistry = {};
+    const key = _buildRegistryKey(modelId, baseUrl);
+    store.modelRegistry[key] = {
+        ...caps,
+        modelId,
+        baseUrl: baseUrl || '',
+        updatedAt: Date.now()
+    };
+    saveData();
+}
+
+/**
+ * 删除模型的手动覆盖
+ */
+function deleteModelCapabilities(modelId, baseUrl) {
+    if (!modelId || !store.modelRegistry) return;
+    const key = _buildRegistryKey(modelId, baseUrl);
+    delete store.modelRegistry[key];
+    // 同时清理旧格式 pure modelId key（兼容旧数据）
+    if (key !== modelId) delete store.modelRegistry[modelId];
+    saveData();
+}
+
+/**
+ * 打开模型能力编辑器弹窗
+ */
+function openModelCapabilityEditor(modelId, sourceInputId) {
+    if (!modelId) {
+        alert('请先输入或选择一个模型');
+        return;
+    }
+
+    const baseUrl = _getBaseUrlForInput(sourceInputId);
+    const registryKey = _buildRegistryKey(modelId, baseUrl);
+    const caps = getModelCapabilities(modelId, baseUrl);
+    const manual = (store.modelRegistry || {})[registryKey] || (store.modelRegistry || {})[modelId];
+
+    // 构建弹窗
+    const overlay = document.createElement('div');
+    overlay.id = 'model-cap-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg,#1a1a2e);color:var(--text,#e0e0e0);border-radius:12px;padding:24px;width:90%;max-width:420px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+
+    const capFields = [
+        { key: 'supportsVision', label: '视觉 (读图)', icon: '👁' },
+        { key: 'supportsReasoning', label: '推理 (思考链)', icon: '🧠' },
+        { key: 'supportsTools', label: '工具调用', icon: '🔧' },
+        { key: 'supportsTemperature', label: '支持 Temperature', icon: '🌡' },
+        { key: 'supportsTopP', label: '支持 Top-P', icon: '📊' },
+        { key: 'inputText', label: '输入: 文本', icon: '📝' },
+        { key: 'inputImage', label: '输入: 图片', icon: '🖼' },
+        { key: 'outputText', label: '输出: 文本', icon: '💬' },
+        { key: 'outputImage', label: '输出: 图片', icon: '🎨' },
+    ];
+
+    const togglesHtml = capFields.map(f => {
+        const checked = caps[f.key] ? 'checked' : '';
+        const autoVal = _autoDetectModelCapabilities(modelId)[f.key];
+        const manualOverride = manual && manual[f.key] !== undefined;
+        const badge = manualOverride ? '<span style="font-size:0.6rem;background:var(--accent,#7c3aed);color:#fff;padding:1px 5px;border-radius:4px;margin-left:6px;">手动</span>' : '<span style="font-size:0.6rem;opacity:0.5;margin-left:6px;">自动</span>';
+        return `<label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;">
+            <input type="checkbox" id="mcap-${f.key}" ${checked} style="width:auto;accent-color:var(--accent,#7c3aed);">
+            <span style="flex:1;">${f.icon} ${f.label}</span>
+            ${badge}
+        </label>`;
+    }).join('');
+
+    modal.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="margin:0;font-size:1.1rem;">编辑模型</h3>
+            <button id="mcap-close" style="background:none;border:none;color:var(--text,#e0e0e0);font-size:1.5rem;cursor:pointer;padding:0 4px;">&times;</button>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid rgba(255,255,255,0.1);padding-bottom:8px;">
+            <button class="mcap-tab active" data-tab="basic" style="background:var(--accent,#7c3aed);color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:0.85rem;">基本设置</button>
+            <button class="mcap-tab" data-tab="advanced" style="background:transparent;color:var(--text,#e0e0e0);border:1px solid rgba(255,255,255,0.2);padding:6px 16px;border-radius:6px;cursor:pointer;font-size:0.85rem;">高级设置</button>
+        </div>
+
+        <div id="mcap-tab-basic">
+            <div style="margin-bottom:12px;">
+                <label style="font-size:0.8rem;opacity:0.7;display:block;margin-bottom:4px;">模型 ID</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="mcap-model-id" value="${modelId}" style="flex:1;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:var(--text,#e0e0e0);" readonly>
+                    <button onclick="navigator.clipboard.writeText('${modelId}')" style="background:none;border:1px solid rgba(255,255,255,0.15);border-radius:6px;padding:6px 8px;cursor:pointer;color:var(--text,#e0e0e0);font-size:0.8rem;" title="复制">📋</button>
+                </div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <label style="font-size:0.8rem;opacity:0.7;display:block;margin-bottom:4px;">显示名称</label>
+                <input id="mcap-display-name" value="${manual?.displayName || modelId}" style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:var(--text,#e0e0e0);box-sizing:border-box;">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label style="font-size:0.8rem;opacity:0.7;display:block;margin-bottom:8px;">能力开关</label>
+                ${togglesHtml}
+            </div>
+        </div>
+
+        <div id="mcap-tab-advanced" style="display:none;">
+            <div style="margin-bottom:12px;">
+                <label style="font-size:0.8rem;opacity:0.7;display:block;margin-bottom:4px;">备注</label>
+                <textarea id="mcap-notes" rows="3" style="width:100%;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:var(--text,#e0e0e0);resize:vertical;box-sizing:border-box;">${manual?.notes || ''}</textarea>
+            </div>
+            <div style="font-size:0.75rem;opacity:0.5;margin-bottom:12px;">
+                来源: ${caps.source === 'manual' ? '手动覆盖' : '自动检测'}<br>
+                ${manual?.updatedAt ? '上次编辑: ' + new Date(manual.updatedAt).toLocaleString() : ''}
+            </div>
+            <button id="mcap-reset" style="background:#dc2626;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:0.85rem;width:100%;">重置为自动检测</button>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            <button id="mcap-save" style="flex:1;background:var(--accent,#7c3aed);color:#fff;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:0.95rem;">✓ 确认</button>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Tab switching
+    modal.querySelectorAll('.mcap-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            modal.querySelectorAll('.mcap-tab').forEach(t => {
+                t.style.background = 'transparent';
+                t.style.color = 'var(--text,#e0e0e0)';
+                t.style.border = '1px solid rgba(255,255,255,0.2)';
+                t.classList.remove('active');
+            });
+            tab.style.background = 'var(--accent,#7c3aed)';
+            tab.style.color = '#fff';
+            tab.style.border = 'none';
+            tab.classList.add('active');
+            document.getElementById('mcap-tab-basic').style.display = tab.dataset.tab === 'basic' ? 'block' : 'none';
+            document.getElementById('mcap-tab-advanced').style.display = tab.dataset.tab === 'advanced' ? 'block' : 'none';
+        });
+    });
+
+    // Close
+    const closeModal = () => overlay.remove();
+    document.getElementById('mcap-close').addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+    // Reset
+    document.getElementById('mcap-reset').addEventListener('click', () => {
+        deleteModelCapabilities(modelId, baseUrl);
+        closeModal();
+        if (typeof loadApiConfigToUI === 'function') loadApiConfigToUI();
+        alert(`已重置 ${modelId} 为自动检测`);
+    });
+
+    // Save
+    document.getElementById('mcap-save').addEventListener('click', () => {
+        const newCaps = {};
+        capFields.forEach(f => {
+            newCaps[f.key] = document.getElementById(`mcap-${f.key}`).checked;
+        });
+        newCaps.displayName = document.getElementById('mcap-display-name').value.trim() || modelId;
+        newCaps.notes = document.getElementById('mcap-notes').value.trim();
+        saveModelCapabilities(modelId, newCaps, baseUrl);
+        closeModal();
+        if (typeof loadApiConfigToUI === 'function') loadApiConfigToUI();
+        alert(`已保存 ${modelId} 的能力配置`);
+    });
+}
 
 const VESPER_QUOTES = {
     empty: [
@@ -604,7 +903,10 @@ function resetUI() {
 // ==================== 角色管理功能 ====================
 
 let currentEditingCharacter = null;
+let currentEditingCharacterPackage = null;
 let currentChatCharacter = null;
+let currentChatCharacterSlug = null;   // package slug for the active chat character; stable chat-state field
+let _pendingChatCharacterId = null;    // set synchronously at the start of open*; guards async slug back-fill
 let currentCharacterSession = null;
 let chatOpenedFromCharacterManager = false;
 const characterSessionExpandState = new Set();
@@ -612,6 +914,11 @@ let currentCharacterSessionMenuSessionId = null;
 let characterSessionMenuBound = false;
 const avatarPlaceholderCache = new Map();
 const DEFAULT_CHARACTER_SESSION_NAME = '主窗口';
+let cachedCharacterPackageSummaries = null;
+let cachedCharacterPackageDefaults = null;
+const CHARACTER_PACKAGE_PROMPT_DEFAULT_SURFACE = 'chat';
+const CHARACTER_PACKAGE_PROMPT_DEFAULT_CAPABILITY_VIEW = 'materialized';
+const CHARACTER_PACKAGE_PROMPT_DEFAULT_INCLUDE_DEBUG = true;
 
 function escapeSvgText(text) {
     return String(text || '')
@@ -658,6 +965,865 @@ function generateCharacterSessionId() {
 
 function isCharacterSessionModeEnabled(character) {
     return character?.settings?.sessionMigrationDecision === 'accepted';
+}
+
+function getLifeOSAuthToken() {
+    return localStorage.getItem('lifeos_auth_token') || localStorage.getItem('token') || '';
+}
+
+async function characterPackageApiFetch(path, options = {}) {
+    const token = getLifeOSAuthToken();
+    const headers = { ...(options.headers || {}) };
+    if (token) headers.Authorization = 'Bearer ' + token;
+    if (options.body != null && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+    }
+
+    const response = await fetch(path, { ...options, headers });
+    const raw = await response.text();
+    let data = null;
+    try {
+        data = raw ? JSON.parse(raw) : null;
+    } catch (err) {
+        data = null;
+    }
+
+    if (!response.ok) {
+        throw new Error(data?.error || raw || ('HTTP ' + response.status));
+    }
+    return data;
+}
+
+function setCharacterPackageStatus(message, tone = 'neutral') {
+    const el = document.getElementById('character-package-status');
+    if (!el) return;
+    const styles = {
+        neutral: {
+            background: 'var(--bg)',
+            borderColor: 'rgba(0,0,0,0.1)',
+            color: 'var(--text-secondary)'
+        },
+        loading: {
+            background: 'rgba(79, 195, 247, 0.08)',
+            borderColor: 'rgba(79, 195, 247, 0.25)',
+            color: 'var(--text)'
+        },
+        ok: {
+            background: 'rgba(76, 175, 80, 0.08)',
+            borderColor: 'rgba(76, 175, 80, 0.25)',
+            color: 'var(--text)'
+        },
+        warn: {
+            background: 'rgba(255, 193, 7, 0.08)',
+            borderColor: 'rgba(255, 193, 7, 0.28)',
+            color: 'var(--text)'
+        },
+        error: {
+            background: 'rgba(244, 67, 54, 0.08)',
+            borderColor: 'rgba(244, 67, 54, 0.28)',
+            color: 'var(--text)'
+        }
+    };
+    const style = styles[tone] || styles.neutral;
+    el.textContent = message;
+    el.style.background = style.background;
+    el.style.borderColor = style.borderColor;
+    el.style.color = style.color;
+}
+
+function setCharacterPackageFieldsetEnabled(enabled) {
+    const fieldset = document.getElementById('character-package-fieldset');
+    if (fieldset) fieldset.disabled = !enabled;
+}
+
+function setCharacterPackageRuntimeSummary(message, tone = 'neutral') {
+    const el = document.getElementById('character-package-runtime-summary');
+    if (!el) return;
+    const styles = {
+        neutral: {
+            background: 'rgba(255, 193, 7, 0.06)',
+            borderColor: 'rgba(255, 193, 7, 0.18)',
+            color: 'var(--text-secondary)'
+        },
+        loading: {
+            background: 'rgba(79, 195, 247, 0.06)',
+            borderColor: 'rgba(79, 195, 247, 0.18)',
+            color: 'var(--text-secondary)'
+        },
+        ok: {
+            background: 'rgba(76, 175, 80, 0.06)',
+            borderColor: 'rgba(76, 175, 80, 0.18)',
+            color: 'var(--text-secondary)'
+        },
+        warn: {
+            background: 'rgba(255, 193, 7, 0.06)',
+            borderColor: 'rgba(255, 193, 7, 0.18)',
+            color: 'var(--text-secondary)'
+        },
+        error: {
+            background: 'rgba(244, 67, 54, 0.06)',
+            borderColor: 'rgba(244, 67, 54, 0.18)',
+            color: 'var(--text-secondary)'
+        }
+    };
+    const style = styles[tone] || styles.neutral;
+    el.innerHTML = message;
+    el.style.background = style.background;
+    el.style.borderColor = style.borderColor;
+    el.style.color = style.color;
+}
+
+function setCharacterPackageInputValue(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = value == null ? '' : String(value);
+}
+
+function setCharacterPackageCheckboxValue(id, checked) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.checked = !!checked;
+}
+
+function formatCharacterPackageList(items) {
+    if (!Array.isArray(items) || items.length === 0) return '';
+    return items.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
+}
+
+function parseCharacterPackageList(text, label) {
+    const lines = String(text || '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+
+    return lines.map((line, index) => {
+        if (/^[\[{]/.test(line)) {
+            try {
+                return JSON.parse(line);
+            } catch (err) {
+                throw new Error(`${label} 第 ${index + 1} 行不是合法 JSON: ${err.message}`);
+            }
+        }
+        return line;
+    });
+}
+
+function resetCharacterPackageForm() {
+    currentEditingCharacterPackage = null;
+    setCharacterPackageFieldsetEnabled(false);
+    const createSection = document.getElementById('character-package-create-section');
+    if (createSection) createSection.style.display = 'none';
+    setCharacterPackageInputValue('character-package-create-slug', '');
+    setCharacterPackageRuntimeSummary('正在读取当前 runtime override 摘要...', 'loading');
+    setCharacterPackageInputValue('character-package-slug-display', '');
+    setCharacterPackageInputValue('character-package-character-id', currentEditingCharacter?.id || '');
+    setCharacterPackageInputValue('character-package-default-model', '');
+    setCharacterPackageInputValue('character-package-vault-keyword', '');
+    setCharacterPackageInputValue('character-package-tool-memory', 'read_write');
+    setCharacterPackageInputValue('character-package-tool-obsidian', 'read_only');
+    setCharacterPackageInputValue('character-package-tool-web-search', 'disabled');
+    setCharacterPackageInputValue('character-package-memory-default-pool', 'private_character');
+    setCharacterPackageCheckboxValue('character-package-memory-allow-shared-recall', false);
+    setCharacterPackageCheckboxValue('character-package-vision-enabled', true);
+    setCharacterPackageInputValue('character-package-vision-max-images', 5);
+    setCharacterPackageCheckboxValue('character-package-discord-enabled', true);
+    setCharacterPackageInputValue('character-package-discord-bot-name', '');
+    setCharacterPackageInputValue('character-package-discord-token-env', '');
+    setCharacterPackageInputValue('character-package-discord-api-key-env', '');
+    setCharacterPackageInputValue('character-package-discord-api-url', '');
+    setCharacterPackageInputValue('character-package-discord-api-model', '');
+    setCharacterPackageInputValue('character-package-tool-web-fetch', 'disabled');
+    setCharacterPackageInputValue('character-package-web-fetch-max-per-day', 5);
+    setCharacterPackageInputValue('character-package-quota-daily-outreach', 1);
+    setCharacterPackageInputValue('character-package-quota-cooldown-hours', 6);
+    setCharacterPackageInputValue('character-package-quota-searches-per-day', 5);
+    setCharacterPackageInputValue('character-package-quota-fetches-per-day', 3);
+    setCharacterPackageCheckboxValue('character-package-lifeos-enabled', true);
+    setCharacterPackageInputValue('character-package-lifeos-api-key-env', '');
+    setCharacterPackageInputValue('character-package-lifeos-api-url', '');
+    setCharacterPackageInputValue('character-package-lifeos-api-model', '');
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-chat', true);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-bg', false);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-obsidian', true);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-mcp', false);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-vision', true);
+    const resolvedPreviewEl = document.getElementById('character-package-resolved-preview');
+    if (resolvedPreviewEl) resolvedPreviewEl.style.display = 'none';
+    const promptPreviewEl = document.getElementById('character-package-prompt-preview');
+    if (promptPreviewEl) promptPreviewEl.style.display = 'none';
+    setCharacterPackageInputValue('character-package-prompt-surface', CHARACTER_PACKAGE_PROMPT_DEFAULT_SURFACE);
+    setCharacterPackageInputValue('character-package-prompt-capability-view', CHARACTER_PACKAGE_PROMPT_DEFAULT_CAPABILITY_VIEW);
+    setCharacterPackageCheckboxValue('character-package-prompt-debug', CHARACTER_PACKAGE_PROMPT_DEFAULT_INCLUDE_DEBUG);
+    setCharacterPackagePromptPreviewStatus('Prompt Preview 尚未加载。', 'neutral');
+    setCharacterPackagePromptPreviewColumn('discord', null);
+    setCharacterPackagePromptPreviewColumn('lifeos', null);
+    setCharacterPackageInputValue('character-package-skills', '');
+    setCharacterPackageInputValue('character-package-plugins', '');
+}
+
+function formatRuntimeOverrideSummary(runtime) {
+    if (!runtime) {
+        return '未拿到 runtime 信息。';
+    }
+
+    const botBaselineModel = runtime.bot?.baseline?.model || '未设置';
+    const botEffectiveModel = runtime.bot?.effective?.model || '未设置';
+    const botBaselineUrl = runtime.bot?.baseline?.url || '未设置';
+    const botEffectiveUrl = runtime.bot?.effective?.url || '未设置';
+    const visionMax = runtime.vision?.effective?.maxImages ?? runtime.vision?.baseline?.maxImages ?? 5;
+    const visionModel = runtime.vision?.effective?.model || '未设置';
+
+    const tags = [];
+    if (runtime.bot?.overridden?.model) tags.push('模型已被 override');
+    if (runtime.bot?.overridden?.url) tags.push('URL 已被 override');
+    if (runtime.vision?.overridden?.model || runtime.vision?.overridden?.url || runtime.vision?.overridden?.maxImages) {
+        tags.push('Vision 已被 override');
+    }
+    if (tags.length === 0) tags.push('当前运行值与角色包基线一致');
+
+    return [
+        `<div><strong style="color:var(--text);">当前运行摘要</strong>：${tags.join(' · ')}</div>`,
+        `<div style="margin-top:6px;">Bot 模型：<code>${escapeHtml(botEffectiveModel)}</code>（基线 <code>${escapeHtml(botBaselineModel)}</code>）</div>`,
+        `<div>Bot URL：<code>${escapeHtml(botEffectiveUrl)}</code>（基线 <code>${escapeHtml(botBaselineUrl)}</code>）</div>`,
+        `<div>Vision：<code>${escapeHtml(visionModel)}</code> · 最多 <code>${escapeHtml(String(visionMax))}</code> 张</div>`
+    ].join('');
+}
+
+async function loadCharacterPackageDefaults() {
+    if (cachedCharacterPackageDefaults) return cachedCharacterPackageDefaults;
+    cachedCharacterPackageDefaults = await characterPackageApiFetch('/api/character-packages/global/defaults');
+    return cachedCharacterPackageDefaults;
+}
+
+function formatResolvedPreview(resolved) {
+    if (!resolved) return '—';
+    const caps = Array.isArray(resolved.capabilities?.capabilities)
+        ? resolved.capabilities.capabilities.filter(c => c.enabled !== false).map(c => c.id).join(', ')
+        : '—';
+    const binding = resolved.selectedBinding || {};
+    const apiConfig = (binding.apiConfig && typeof binding.apiConfig === 'object') ? binding.apiConfig : {};
+    const bindingState = binding.enabled !== false ? '启用' : '关闭';
+    const lines = [
+        `model: ${resolved.runtime_defaults?.model || '—'}`,
+        `vault: ${resolved.runtime_defaults?.obsidian_vault || '—'}`,
+        `binding: ${bindingState}` + (apiConfig.model ? ` (${apiConfig.model})` : ''),
+        `caps (on): ${caps}`
+    ];
+    const q = resolved.policies?.quota;
+    if (q) {
+        lines.push(`quota: 主动≤${q.daily_outreach_limit ?? '?'}/日 冷却${q.same_action_cooldown_hours ?? '?'}h`);
+    }
+    const mem = resolved.policies?.autonomy?.memory;
+    if (mem) {
+        lines.push(`memory: pool=${mem.default_pool ?? '—'} shared_recall=${mem.allow_shared_recall ?? '?'}`);
+    }
+    return lines.join('\n');
+}
+
+async function loadResolvedPreview(slug) {
+    const previewEl = document.getElementById('character-package-resolved-preview');
+    const discordEl = document.getElementById('character-package-resolved-discord');
+    const lifeosEl = document.getElementById('character-package-resolved-lifeos');
+    if (!previewEl || !discordEl || !lifeosEl) return;
+    try {
+        const [discord, lifeos] = await Promise.all([
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/resolved?platform=discord').catch(() => null),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/resolved?platform=lifeos').catch(() => null)
+        ]);
+        discordEl.textContent = formatResolvedPreview(discord);
+        lifeosEl.textContent = formatResolvedPreview(lifeos);
+        previewEl.style.display = '';
+    } catch {
+        previewEl.style.display = 'none';
+    }
+}
+
+function setCharacterPackagePromptPreviewStatus(message, tone = 'neutral') {
+    const el = document.getElementById('character-package-prompt-status');
+    if (!el) return;
+    const styles = {
+        neutral: {
+            background: 'rgba(79, 195, 247, 0.06)',
+            borderColor: 'rgba(79, 195, 247, 0.16)',
+            color: 'var(--text-secondary)'
+        },
+        loading: {
+            background: 'rgba(79, 195, 247, 0.08)',
+            borderColor: 'rgba(79, 195, 247, 0.22)',
+            color: 'var(--text)'
+        },
+        ok: {
+            background: 'rgba(76, 175, 80, 0.06)',
+            borderColor: 'rgba(76, 175, 80, 0.18)',
+            color: 'var(--text-secondary)'
+        },
+        warn: {
+            background: 'rgba(255, 193, 7, 0.06)',
+            borderColor: 'rgba(255, 193, 7, 0.18)',
+            color: 'var(--text-secondary)'
+        },
+        error: {
+            background: 'rgba(244, 67, 54, 0.06)',
+            borderColor: 'rgba(244, 67, 54, 0.18)',
+            color: 'var(--text-secondary)'
+        }
+    };
+    const style = styles[tone] || styles.neutral;
+    el.textContent = message;
+    el.style.background = style.background;
+    el.style.borderColor = style.borderColor;
+    el.style.color = style.color;
+}
+
+function getCharacterPackagePromptPreviewOptions() {
+    const surface = document.getElementById('character-package-prompt-surface')?.value || CHARACTER_PACKAGE_PROMPT_DEFAULT_SURFACE;
+    const capabilityView = document.getElementById('character-package-prompt-capability-view')?.value || CHARACTER_PACKAGE_PROMPT_DEFAULT_CAPABILITY_VIEW;
+    const includeCapabilityRuntimeDebug = !!document.getElementById('character-package-prompt-debug')?.checked;
+    return { surface, capabilityView, includeCapabilityRuntimeDebug };
+}
+
+function buildCharacterPackagePromptPreviewPath(slug, platform, options = {}) {
+    const params = new URLSearchParams();
+    params.set('platform', platform);
+    params.set('surface', options.surface || CHARACTER_PACKAGE_PROMPT_DEFAULT_SURFACE);
+    params.set('capabilityView', options.capabilityView || CHARACTER_PACKAGE_PROMPT_DEFAULT_CAPABILITY_VIEW);
+    if (options.includeCapabilityRuntimeDebug) {
+        params.set('includeCapabilityRuntimeDebug', '1');
+    }
+    return '/api/character-packages/' + encodeURIComponent(slug) + '/prompt-preview?' + params.toString();
+}
+
+function formatCharacterPackagePromptPreviewMeta(preview) {
+    if (!preview) return '—';
+    const warningText = Array.isArray(preview.warnings) && preview.warnings.length > 0
+        ? preview.warnings.join(' | ')
+        : 'none';
+    return [
+        `surface: ${preview.surface || '—'}`,
+        `capability_view: ${preview.capabilitySummaryMode || 'resolved'}`,
+        `chars: ${preview.budget?.usedChars ?? '?'} / ${preview.budget?.maxPromptChars ?? '?'}`,
+        `sections: ${Array.isArray(preview.sections) ? preview.sections.length : 0}`,
+        `stable/semi/dynamic: ${preview.budget?.stableChars ?? 0} / ${preview.budget?.semiStableChars ?? 0} / ${preview.budget?.dynamicChars ?? 0}`,
+        `cache: stablePrefixHit=${preview.cache?.stablePrefixHit ? 'yes' : 'no'}`,
+        `warnings: ${warningText}`,
+        `compileKey: ${preview.compileKey || '—'}`,
+        `stablePrefixKey: ${preview.stablePrefixKey || '—'}`
+    ].join('\n');
+}
+
+function formatCharacterPackagePromptPreviewDebug(preview, includeDebug) {
+    if (!includeDebug) return '[ runtime debug disabled ]';
+    if (!preview?.debug?.capabilityRuntime) return '—';
+    return JSON.stringify(preview.debug.capabilityRuntime, null, 2);
+}
+
+function setCharacterPackagePromptPreviewColumn(platform, preview, options = {}, errorMessage = '') {
+    const metaEl = document.getElementById(`character-package-prompt-${platform}-meta`);
+    const textEl = document.getElementById(`character-package-prompt-${platform}-text`);
+    const debugEl = document.getElementById(`character-package-prompt-${platform}-debug`);
+    if (!metaEl || !textEl || !debugEl) return;
+
+    if (errorMessage) {
+        metaEl.textContent = `读取失败: ${errorMessage}`;
+        textEl.textContent = '—';
+        debugEl.textContent = '—';
+        return;
+    }
+
+    metaEl.textContent = formatCharacterPackagePromptPreviewMeta(preview);
+    textEl.textContent = preview?.promptText || '—';
+    debugEl.style.display = options.includeCapabilityRuntimeDebug ? '' : 'none';
+    debugEl.textContent = formatCharacterPackagePromptPreviewDebug(preview, !!options.includeCapabilityRuntimeDebug);
+}
+
+async function loadCharacterPackagePromptPreview(slug) {
+    const previewEl = document.getElementById('character-package-prompt-preview');
+    if (!previewEl) return;
+    if (!slug) {
+        previewEl.style.display = 'none';
+        return;
+    }
+
+    const token = getLifeOSAuthToken();
+    if (!token) {
+        previewEl.style.display = 'none';
+        return;
+    }
+
+    const options = getCharacterPackagePromptPreviewOptions();
+    previewEl.style.display = '';
+    setCharacterPackagePromptPreviewStatus(
+        `正在读取 Prompt Preview… surface=${options.surface} · capabilityView=${options.capabilityView} · debug=${options.includeCapabilityRuntimeDebug ? 'on' : 'off'}`,
+        'loading'
+    );
+    setCharacterPackagePromptPreviewColumn('discord', null, options);
+    setCharacterPackagePromptPreviewColumn('lifeos', null, options);
+
+    const [discordResult, lifeosResult] = await Promise.all([
+        characterPackageApiFetch(buildCharacterPackagePromptPreviewPath(slug, 'discord', options))
+            .then(data => ({ ok: true, data }))
+            .catch(err => ({ ok: false, error: err })),
+        characterPackageApiFetch(buildCharacterPackagePromptPreviewPath(slug, 'lifeos', options))
+            .then(data => ({ ok: true, data }))
+            .catch(err => ({ ok: false, error: err }))
+    ]);
+
+    if (discordResult.ok) {
+        setCharacterPackagePromptPreviewColumn('discord', discordResult.data, options);
+    } else {
+        setCharacterPackagePromptPreviewColumn('discord', null, options, discordResult.error?.message || 'unknown error');
+    }
+
+    if (lifeosResult.ok) {
+        setCharacterPackagePromptPreviewColumn('lifeos', lifeosResult.data, options);
+    } else {
+        setCharacterPackagePromptPreviewColumn('lifeos', null, options, lifeosResult.error?.message || 'unknown error');
+    }
+
+    if (discordResult.ok && lifeosResult.ok) {
+        const discordSections = Array.isArray(discordResult.data?.sections) ? discordResult.data.sections.length : 0;
+        const lifeosSections = Array.isArray(lifeosResult.data?.sections) ? lifeosResult.data.sections.length : 0;
+        setCharacterPackagePromptPreviewStatus(
+            `Prompt Preview 已刷新：discord ${discordSections} sections · lifeos ${lifeosSections} sections · capabilityView=${options.capabilityView}`,
+            'ok'
+        );
+    } else if (discordResult.ok || lifeosResult.ok) {
+        setCharacterPackagePromptPreviewStatus(
+            `Prompt Preview 部分成功：discord=${discordResult.ok ? 'ok' : 'error'} · lifeos=${lifeosResult.ok ? 'ok' : 'error'}`,
+            'warn'
+        );
+    } else {
+        setCharacterPackagePromptPreviewStatus('Prompt Preview 读取失败，请检查登录态或后端接口。', 'error');
+    }
+}
+
+async function refreshCharacterPackagePromptPreview() {
+    const slug = document.getElementById('character-package-slug-display')?.value.trim();
+    if (!slug) return;
+    await loadCharacterPackagePromptPreview(slug);
+}
+
+async function loadHooksLog() {
+    const listEl = document.getElementById('hooks-log-list');
+    const statsEl = document.getElementById('hooks-log-stats');
+    if (!listEl) return;
+
+    listEl.innerHTML = '<span style="opacity:0.45;">加载中…</span>';
+    try {
+        const data = await characterPackageApiFetch('/api/character-packages/hooks/log?n=80');
+        const entries = data?.entries || [];
+        const stats = data?.stats || {};
+
+        if (statsEl) {
+            const parts = [];
+            if (stats.total != null) parts.push(`内存 ${stats.total} 条`);
+            if (stats.byEvent) parts.push('事件: ' + Object.entries(stats.byEvent).map(([k, v]) => `${k}×${v}`).join(' '));
+            if (stats.byAction) parts.push('动作: ' + Object.entries(stats.byAction).map(([k, v]) => `${k}×${v}`).join(' '));
+            statsEl.textContent = parts.join(' | ') || '—';
+        }
+
+        if (!entries.length) {
+            listEl.innerHTML = '<span style="opacity:0.45;">暂无记录</span>';
+            return;
+        }
+
+        listEl.innerHTML = entries.map(e => {
+            const ts = (e.created_at || e.ts || '').slice(0, 19).replace('T', ' ');
+            const event = e.event_name || e.event || '—';
+            const action = e.action || '—';
+            const rule = e.rule_id || e.ruleId || '—';
+            const char = e.character_id || e.characterId || e.slug || '';
+            const charTag = char ? `<span style="opacity:0.55;">[${char}]</span> ` : '';
+            return `<div style="border-bottom:1px solid rgba(0,0,0,0.06); padding:3px 0;">`
+                + `<span style="opacity:0.5;">${ts}</span> `
+                + charTag
+                + `<span style="color:var(--accent);">${event}</span> `
+                + `→ <b>${action}</b> `
+                + `<span style="opacity:0.5; font-size:0.68rem;">${rule}</span>`
+                + `</div>`;
+        }).join('');
+    } catch (err) {
+        listEl.innerHTML = `<span style="color:red; opacity:0.7;">读取失败: ${err.message}</span>`;
+    }
+}
+
+function fillCharacterPackageForm(pkg, defaults) {
+    const profile = pkg?.profile || {};
+    // v2: prefer runtime_defaults; fall back to v1 legacy aliases
+    const runtimeDefaults = pkg?.runtime_defaults || {};
+    // v2: prefer resolved capabilities; fall back to legacy toolPolicy
+    const capabilities = Array.isArray(pkg?.capabilities?.capabilities) ? pkg.capabilities.capabilities : [];
+    const legacyToolPolicy = pkg?.legacy?.toolPolicy || profile.toolPolicy || defaults?.toolPolicy || {};
+    // v2: prefer policies.autonomy.memory (snake_case); fall back to profile.memoryPolicy (camelCase)
+    const autonomyMemory = pkg?.policies?.autonomy?.memory || {};
+    const legacyMemPolicy = profile.memoryPolicy || {};
+    const discord = pkg?.bindings?.discord || {};
+    const apiConfig = discord.apiConfig || {};
+
+    const getCap = (id) => capabilities.find(c => c?.id === id);
+    const capToAccess = (cap, legacyValue, def) => {
+        if (!cap) return legacyValue || def;
+        return cap.enabled === false ? 'disabled' : (cap.access || legacyValue || def);
+    };
+
+    setCharacterPackageInputValue('character-package-slug-display', pkg?.slug || profile.slug || '');
+    setCharacterPackageInputValue('character-package-character-id', profile.characterId || currentEditingCharacter?.id || '');
+    // v2 runtime_defaults first
+    setCharacterPackageInputValue('character-package-default-model', runtimeDefaults.model || profile.defaultModel || '');
+    setCharacterPackageInputValue('character-package-vault-keyword', runtimeDefaults.obsidian_vault || profile.obsidianVaultKeyword || '');
+    // Tool capabilities → resolved capability access, fall back to legacy toolPolicy
+    // Memory: need memory_save + memory_search combo to distinguish read_only from disabled
+    // read_write = memory_save.enabled; read_only = memory_save off but memory_search on; disabled = both off
+    const memorySaveCap = getCap('memory_save');
+    const memorySearchCap = getCap('memory_search');
+    let memoryAccessDisplay;
+    if (!memorySaveCap && !memorySearchCap) {
+        memoryAccessDisplay = legacyToolPolicy.memory || 'read_write';
+    } else if (memorySaveCap?.enabled !== false) {
+        memoryAccessDisplay = 'read_write';
+    } else if (memorySearchCap?.enabled !== false) {
+        memoryAccessDisplay = 'read_only';
+    } else {
+        memoryAccessDisplay = 'disabled';
+    }
+    setCharacterPackageInputValue('character-package-tool-memory', memoryAccessDisplay);
+    setCharacterPackageInputValue('character-package-tool-obsidian', capToAccess(getCap('obsidian_mcp'), legacyToolPolicy.obsidian, 'read_only'));
+    setCharacterPackageInputValue('character-package-tool-web-search', capToAccess(getCap('web_search'), legacyToolPolicy.web_search, 'disabled'));
+    // Memory policy: v2 snake_case first, fall back to legacy camelCase
+    setCharacterPackageInputValue('character-package-memory-default-pool',
+        autonomyMemory.default_pool || legacyMemPolicy.defaultPool || 'private_character');
+    setCharacterPackageCheckboxValue('character-package-memory-allow-shared-recall',
+        autonomyMemory.allow_shared_recall !== undefined ? autonomyMemory.allow_shared_recall : (legacyMemPolicy.allowSharedRecall !== false));
+    // Vision: from resolved capabilities first, fall back to legacy visionPolicy
+    const visionCap = getCap('vision');
+    const legacyVision = profile.visionPolicy || {};
+    setCharacterPackageCheckboxValue('character-package-vision-enabled',
+        visionCap ? visionCap.enabled !== false : legacyVision.enabled !== false);
+    setCharacterPackageInputValue('character-package-vision-max-images',
+        visionCap?.config?.maxImages || legacyVision.maxImages || 5);
+    setCharacterPackageCheckboxValue('character-package-discord-enabled', discord.enabled !== false);
+    setCharacterPackageInputValue('character-package-discord-bot-name', discord.botName || '');
+    setCharacterPackageInputValue('character-package-discord-token-env', discord.tokenEnvVar || '');
+    setCharacterPackageInputValue('character-package-discord-api-key-env', discord.apiKeyEnvVar || '');
+    setCharacterPackageInputValue('character-package-discord-api-url', apiConfig.url || '');
+    setCharacterPackageInputValue('character-package-discord-api-model', apiConfig.model || '');
+    // web_fetch capability — only disabled/read_only (read_write is not a real runtime distinction)
+    const webFetchCap = getCap('web_fetch');
+    const webFetchRaw = webFetchCap ? (webFetchCap.enabled === false ? 'disabled' : (webFetchCap.access || 'read_only')) : 'disabled';
+    setCharacterPackageInputValue('character-package-tool-web-fetch',
+        webFetchRaw === 'disabled' ? 'disabled' : 'read_only');
+    setCharacterPackageInputValue('character-package-web-fetch-max-per-day',
+        webFetchCap?.gate?.max_per_day ?? 5);
+    // evidence_hydration read-only display
+    const evidenceCap = getCap('evidence_hydration');
+    const evidenceEl = document.getElementById('character-package-evidence-hydration-info');
+    if (evidenceEl) {
+        const status = evidenceCap ? (evidenceCap.enabled !== false ? '启用' : '关闭') : '未配置';
+        const blocks = evidenceCap?.config?.max_evidence_blocks != null
+            ? ` · ${evidenceCap.config.max_evidence_blocks} 块` : '';
+        evidenceEl.textContent = `evidence_hydration: ${status}${blocks}`;
+    }
+    // quota policy
+    const quota = pkg?.policies?.quota || {};
+    setCharacterPackageInputValue('character-package-quota-daily-outreach',
+        quota.daily_outreach_limit ?? 1);
+    setCharacterPackageInputValue('character-package-quota-cooldown-hours',
+        quota.same_action_cooldown_hours ?? 6);
+    setCharacterPackageInputValue('character-package-quota-searches-per-day',
+        quota.research_budget?.searches_per_day ?? 5);
+    setCharacterPackageInputValue('character-package-quota-fetches-per-day',
+        quota.research_budget?.fetches_per_day ?? 3);
+    // lifeos binding — only treat as enabled if the binding file actually exists (not auto-defaulted from empty)
+    const lifeosBindingRaw = pkg?.bindings?.lifeos ?? null;
+    const lifeosBinding = lifeosBindingRaw || {};
+    const lifeosApiConfig = (lifeosBinding.apiConfig && typeof lifeosBinding.apiConfig === 'object') ? lifeosBinding.apiConfig : {};
+    const lifeosFeatures = (lifeosBinding.features && typeof lifeosBinding.features === 'object') ? lifeosBinding.features : {};
+    setCharacterPackageCheckboxValue('character-package-lifeos-enabled', lifeosBindingRaw != null && lifeosBinding.enabled !== false);
+    setCharacterPackageInputValue('character-package-lifeos-api-key-env', lifeosBinding.apiKeyEnvVar || '');
+    setCharacterPackageInputValue('character-package-lifeos-api-url', lifeosApiConfig.url || '');
+    setCharacterPackageInputValue('character-package-lifeos-api-model', lifeosApiConfig.model || '');
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-chat', lifeosFeatures.chat !== false);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-bg', !!lifeosFeatures.background_activity);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-obsidian', lifeosFeatures.obsidian_search !== false);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-mcp', !!lifeosFeatures.mcp_tools);
+    setCharacterPackageCheckboxValue('character-package-lifeos-feature-vision', lifeosFeatures.vision !== false);
+    setCharacterPackageInputValue('character-package-skills', formatCharacterPackageList(pkg?.skills?.skills));
+    setCharacterPackageInputValue('character-package-plugins', formatCharacterPackageList(pkg?.plugins?.plugins));
+}
+
+async function loadCharacterPackagePanel(characterId) {
+    resetCharacterPackageForm();
+    setCharacterPackageStatus('正在读取角色包...', 'loading');
+
+    const token = getLifeOSAuthToken();
+    if (!token) {
+        setCharacterPackageStatus('未检测到登录态，当前只能查看本地角色信息，角色包能力层保持只读。', 'warn');
+        return;
+    }
+
+    try {
+        const [summaryData, defaults] = await Promise.all([
+            characterPackageApiFetch('/api/character-packages'),
+            loadCharacterPackageDefaults().catch(() => null)
+        ]);
+
+        cachedCharacterPackageSummaries = summaryData?.packages || [];
+        const summary = cachedCharacterPackageSummaries.find(pkg => pkg.characterId === characterId);
+        if (!summary) {
+            setCharacterPackageInputValue('character-package-character-id', characterId || '');
+            setCharacterPackageStatus('当前角色还没有角色包。你可以在下方输入 slug 创建一个。', 'warn');
+            setCharacterPackageRuntimeSummary('当前角色还没有角色包，因此也没有可展示的 runtime 摘要。', 'warn');
+            // Show create section with suggested slug
+            const createSection = document.getElementById('character-package-create-section');
+            if (createSection) {
+                createSection.style.display = 'block';
+                const slugInput = document.getElementById('character-package-create-slug');
+                if (slugInput && !slugInput.value) {
+                    // Suggest slug from character name
+                    const name = currentEditingCharacter?.name || '';
+                    slugInput.value = name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30) || '';
+                }
+            }
+            return;
+        }
+
+        const [detail, runtimeData] = await Promise.all([
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(summary.slug)),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(summary.slug) + '/runtime').catch(() => null)
+        ]);
+        currentEditingCharacterPackage = detail;
+        fillCharacterPackageForm(detail, defaults);
+        setCharacterPackageFieldsetEnabled(true);
+        const globalSkillCount = Array.isArray(defaults?.defaultSkills?.skills) ? defaults.defaultSkills.skills.length : 0;
+        const discordState = detail?.bindings?.discord?.enabled === false ? '已禁用' : '已启用';
+        setCharacterPackageStatus(`已关联角色包 ${summary.slug} · Discord ${discordState} · 全局默认 Skills ${globalSkillCount} 条`, 'ok');
+        setCharacterPackageRuntimeSummary(formatRuntimeOverrideSummary(runtimeData?.runtime), 'ok');
+        loadResolvedPreview(summary.slug);
+        loadCharacterPackagePromptPreview(summary.slug);
+        loadHooksLog();
+    } catch (err) {
+        console.warn('[CharacterPackages] load failed:', err);
+        setCharacterPackageStatus('角色包读取失败：' + err.message, 'error');
+        setCharacterPackageRuntimeSummary('runtime 摘要读取失败：' + err.message, 'error');
+    }
+}
+
+async function createCharacterPackage() {
+    const slugInput = document.getElementById('character-package-create-slug');
+    const slug = (slugInput?.value || '').trim().toLowerCase();
+    if (!slug) {
+        alert('请输入角色包 slug');
+        return;
+    }
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(slug)) {
+        alert('slug 必须是小写英文字母/数字，可包含 - 或 _');
+        return;
+    }
+    const characterId = currentEditingCharacter?.id;
+    if (!characterId) {
+        alert('当前没有选中角色');
+        return;
+    }
+
+    const btn = document.getElementById('character-package-create-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '正在创建...'; }
+
+    try {
+        await characterPackageApiFetch('/api/character-packages', {
+            method: 'POST',
+            body: JSON.stringify({
+                slug,
+                characterId,
+                displayName: currentEditingCharacter?.name || slug
+            })
+        });
+        // Hide create section and reload panel
+        const createSection = document.getElementById('character-package-create-section');
+        if (createSection) createSection.style.display = 'none';
+        cachedCharacterPackageSummaries = null;
+        await loadCharacterPackagePanel(characterId);
+    } catch (err) {
+        alert('创建角色包失败：' + err.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '为当前角色创建角色包骨架'; }
+    }
+}
+
+async function saveCharacterPackagePanel() {
+    const slug = document.getElementById('character-package-slug-display')?.value.trim();
+    if (!slug || !currentEditingCharacterPackage) {
+        return { status: 'skipped' };
+    }
+
+    let skills;
+    let plugins;
+    try {
+        skills = parseCharacterPackageList(document.getElementById('character-package-skills')?.value, 'Skills');
+        plugins = parseCharacterPackageList(document.getElementById('character-package-plugins')?.value, 'Plugins');
+    } catch (err) {
+        return { status: 'error', message: err.message };
+    }
+
+    const modelValue = document.getElementById('character-package-default-model')?.value.trim() || '';
+    const vaultValue = document.getElementById('character-package-vault-keyword')?.value.trim() || '';
+    const memoryAccess = document.getElementById('character-package-tool-memory')?.value || 'read_write';
+    const obsidianAccess = document.getElementById('character-package-tool-obsidian')?.value || 'read_only';
+    const webSearchValue = document.getElementById('character-package-tool-web-search')?.value || 'disabled';
+    const visionEnabled = !!document.getElementById('character-package-vision-enabled')?.checked;
+    const maxImages = Math.max(1, Math.min(10, parseInt(document.getElementById('character-package-vision-max-images')?.value, 10) || 5));
+    const memoryPoolValue = document.getElementById('character-package-memory-default-pool')?.value || 'private_character';
+    const allowSharedRecall = !!document.getElementById('character-package-memory-allow-shared-recall')?.checked;
+
+    // v2 profile: write runtime_defaults (primary) + legacy aliases (compat fallback for resolver)
+    const profilePayload = {
+        runtime_defaults: { model: modelValue, obsidian_vault: vaultValue },
+        defaultModel: modelValue,
+        obsidianVaultKeyword: vaultValue
+    };
+
+    // v2 capabilities: write only the 7 UI-controlled capabilities to character's capabilities.json.
+    // Avoids freezing global-inherited entries (agent_state_update, summarize, mcp, etc.) as character-level copies.
+    const resolvedCapsMap = Object.fromEntries(
+        (currentEditingCharacterPackage?.capabilities?.capabilities || []).map(c => [c.id, c])
+    );
+    const getResolvedCap = (id, defaults) => ({ ...defaults, ...(resolvedCapsMap[id] || {}) });
+    const updatedCaps = [
+        // vision
+        (() => {
+            const cap = getResolvedCap('vision', { id: 'vision', type: 'builtin_skill', scope: 'global' });
+            return { ...cap, enabled: visionEnabled, config: { ...(cap.config || {}), maxImages } };
+        })(),
+        // web_search
+        (() => {
+            const cap = getResolvedCap('web_search', { id: 'web_search', type: 'builtin_skill', scope: 'character' });
+            return { ...cap, enabled: webSearchValue !== 'disabled', access: webSearchValue };
+        })(),
+        // obsidian_mcp
+        (() => {
+            const cap = getResolvedCap('obsidian_mcp', { id: 'obsidian_mcp', type: 'mcp_tool', scope: 'character' });
+            return { ...cap, enabled: obsidianAccess !== 'disabled', access: obsidianAccess };
+        })(),
+        // memory_save
+        (() => {
+            const cap = getResolvedCap('memory_save', { id: 'memory_save', type: 'builtin_skill', scope: 'global' });
+            const enabled = memoryAccess === 'read_write';
+            return { ...cap, enabled, access: enabled ? 'read_write' : 'disabled' };
+        })(),
+        // memory_search / memory_list / memory_hybrid_search: on when not fully disabled
+        ...['memory_search', 'memory_list', 'memory_hybrid_search'].map(id => {
+            const cap = getResolvedCap(id, { id, type: 'builtin_skill', scope: 'global' });
+            const enabled = memoryAccess !== 'disabled';
+            return { ...cap, enabled, access: enabled ? 'read_only' : 'disabled' };
+        }),
+        // web_fetch
+        (() => {
+            const webFetchAccessValue = document.getElementById('character-package-tool-web-fetch')?.value || 'disabled';
+            const webFetchMaxPerDay = Math.max(1, Math.min(100, parseInt(document.getElementById('character-package-web-fetch-max-per-day')?.value, 10) || 5));
+            const cap = getResolvedCap('web_fetch', { id: 'web_fetch', type: 'mcp_tool', scope: 'character' });
+            return { ...cap, enabled: webFetchAccessValue !== 'disabled', access: webFetchAccessValue, gate: { ...(cap.gate || {}), max_per_day: webFetchMaxPerDay } };
+        })()
+    ];
+
+    // v2 policies/autonomy: write memory section (snake_case)
+    const autonomyPayload = {
+        memory: { default_pool: memoryPoolValue, allow_shared_recall: allowSharedRecall }
+    };
+
+    const discordPayload = {
+        enabled: !!document.getElementById('character-package-discord-enabled')?.checked,
+        botName: document.getElementById('character-package-discord-bot-name')?.value.trim() || '',
+        tokenEnvVar: document.getElementById('character-package-discord-token-env')?.value.trim() || '',
+        apiKeyEnvVar: document.getElementById('character-package-discord-api-key-env')?.value.trim() || '',
+        apiConfig: {
+            url: document.getElementById('character-package-discord-api-url')?.value.trim() || '',
+            model: document.getElementById('character-package-discord-api-model')?.value.trim() || ''
+        }
+    };
+
+    const quotaPayload = {
+        daily_outreach_limit: Math.max(0, parseInt(document.getElementById('character-package-quota-daily-outreach')?.value, 10) || 1),
+        same_action_cooldown_hours: Math.max(0, parseInt(document.getElementById('character-package-quota-cooldown-hours')?.value, 10) || 6),
+        research_budget: {
+            searches_per_day: Math.max(0, parseInt(document.getElementById('character-package-quota-searches-per-day')?.value, 10) || 5),
+            fetches_per_day: Math.max(0, parseInt(document.getElementById('character-package-quota-fetches-per-day')?.value, 10) || 3)
+        }
+    };
+
+    const lifeosPayload = {
+        enabled: !!document.getElementById('character-package-lifeos-enabled')?.checked,
+        apiKeyEnvVar: document.getElementById('character-package-lifeos-api-key-env')?.value.trim() || '',
+        apiConfig: {
+            url: document.getElementById('character-package-lifeos-api-url')?.value.trim() || '',
+            model: document.getElementById('character-package-lifeos-api-model')?.value.trim() || ''
+        },
+        features: {
+            chat: !!document.getElementById('character-package-lifeos-feature-chat')?.checked,
+            background_activity: !!document.getElementById('character-package-lifeos-feature-bg')?.checked,
+            obsidian_search: !!document.getElementById('character-package-lifeos-feature-obsidian')?.checked,
+            mcp_tools: !!document.getElementById('character-package-lifeos-feature-mcp')?.checked,
+            vision: !!document.getElementById('character-package-lifeos-feature-vision')?.checked
+        }
+    };
+
+    try {
+        setCharacterPackageStatus(`正在保存角色包 ${slug}...`, 'loading');
+        await Promise.all([
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/profile', {
+                method: 'PUT',
+                body: JSON.stringify(profilePayload)
+            }),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/capabilities', {
+                method: 'PUT',
+                body: JSON.stringify({ version: 1, capabilities: updatedCaps })
+            }),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/policies/autonomy', {
+                method: 'PUT',
+                body: JSON.stringify(autonomyPayload)
+            }),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/policies/quota', {
+                method: 'PUT',
+                body: JSON.stringify(quotaPayload)
+            }),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/bindings/discord', {
+                method: 'PUT',
+                body: JSON.stringify(discordPayload)
+            }),
+            // PUT lifeos binding only if it already exists OR user explicitly enabled/configured it
+            ...(currentEditingCharacterPackage?.bindings?.lifeos != null
+                    || lifeosPayload.enabled
+                    || lifeosPayload.apiConfig.url
+                    || lifeosPayload.apiConfig.model
+                ? [characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/bindings/lifeos', {
+                    method: 'PUT',
+                    body: JSON.stringify(lifeosPayload)
+                })]
+                : []),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/skills', {
+                method: 'PUT',
+                body: JSON.stringify({ skills })
+            }),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/plugins', {
+                method: 'PUT',
+                body: JSON.stringify({ plugins })
+            })
+        ]);
+
+        cachedCharacterPackageSummaries = null;
+        const [refreshed, runtimeData] = await Promise.all([
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug)),
+            characterPackageApiFetch('/api/character-packages/' + encodeURIComponent(slug) + '/runtime').catch(() => null)
+        ]);
+        currentEditingCharacterPackage = refreshed;
+        fillCharacterPackageForm(refreshed, cachedCharacterPackageDefaults);
+        setCharacterPackageStatus(`角色包 ${slug} 已保存，能力层配置已刷新。`, 'ok');
+        setCharacterPackageRuntimeSummary(formatRuntimeOverrideSummary(runtimeData?.runtime), 'ok');
+        loadResolvedPreview(slug);
+        loadCharacterPackagePromptPreview(slug);
+        return { status: 'saved' };
+    } catch (err) {
+        console.warn('[CharacterPackages] save failed:', err);
+        return { status: 'error', message: err.message };
+    }
 }
 
 function normalizeCharacterSession(session) {
@@ -1596,7 +2762,7 @@ async function renameCharacterSession(sessionId) {
     if (currentCharacterSession && currentCharacterSession.id === session.id) {
         currentCharacterSession.name = name;
         if (currentEditingCharacter) {
-            document.getElementById('chat-character-name').textContent = `${currentEditingCharacter.name} · ${name}`;
+            document.getElementById('chat-character-name').textContent = currentEditingCharacter.settings?.nickname || currentEditingCharacter.name;
         }
     }
 
@@ -2298,12 +3464,18 @@ async function openCharacterDetail(characterId) {
     document.getElementById('character-detail-msg-mode').value = character.settings.msgMode || 'split';
 
     // Appearance
-    document.getElementById('character-detail-bg-follow').checked = character.settings.bgFollow === false ? false : true;
-    document.getElementById('character-detail-show-avatar').checked = character.settings.showAvatar === false ? false : true;
     document.getElementById('character-detail-bubble-size').value = character.settings.bubbleSize || 14;
     document.getElementById('bubble-size-value').textContent = (character.settings.bubbleSize || 14) + 'px';
     document.getElementById('character-detail-bubble-css-user').value = character.settings.bubbleCssUser || character.settings.bubbleCss || '';
     document.getElementById('character-detail-bubble-css-ai').value = character.settings.bubbleCssAi || character.settings.bubbleCss || '';
+
+    // Appearance
+    const chatUiMode = character.settings.chatUiMode || (character.settings.bgFollow === false ? 'chatgpt' : 'theme');
+    setChatUiMode(chatUiMode, false);
+
+    let displayMode = character.settings.avatarDisplayMode;
+    if (!displayMode) displayMode = character.settings.showAvatar === false ? 'none' : 'both';
+    setAvatarDisplayMode(displayMode, false);
 
     // 加载样式预设列表
     loadBubblePresetList();
@@ -2328,6 +3500,7 @@ async function openCharacterDetail(characterId) {
     document.getElementById('chat-token-estimate').textContent = '~' + estimatedTokens;
 
     document.getElementById('modal-character-detail').classList.add('active');
+    await loadCharacterPackagePanel(character.id);
 }
 
 // 渲染已关联的世界书标签
@@ -2517,17 +3690,33 @@ async function saveCharacterFullInfo() {
     currentEditingCharacter.settings.msgMode = document.getElementById('character-detail-msg-mode').value;
 
     // Appearance
-    currentEditingCharacter.settings.bgFollow = document.getElementById('character-detail-bg-follow').checked;
-    currentEditingCharacter.settings.showAvatar = document.getElementById('character-detail-show-avatar').checked;
     currentEditingCharacter.settings.bubbleSize = parseInt(document.getElementById('character-detail-bubble-size').value) || 14;
     currentEditingCharacter.settings.bubbleCssUser = document.getElementById('character-detail-bubble-css-user').value.trim();
     currentEditingCharacter.settings.bubbleCssAi = document.getElementById('character-detail-bubble-css-ai').value.trim();
+    currentEditingCharacter.settings.chatUiMode = document.getElementById('character-detail-chat-ui-mode').value || 'theme';
+    currentEditingCharacter.settings.avatarDisplayMode = document.getElementById('character-detail-avatar-display-mode').value || 'both';
+
+    // Legacy compatibility fields
+    currentEditingCharacter.settings.bgFollow = currentEditingCharacter.settings.chatUiMode !== 'chatgpt';
+    currentEditingCharacter.settings.showAvatar = currentEditingCharacter.settings.avatarDisplayMode !== 'none';
 
     await db.characters.put(currentEditingCharacter);
     saveData(); // Save global store for userPersona and userAvatar
     await renderCharacterList(); // Refresh list
 
-    alert('角色信息已保存!');
+    // Invalidate prompt cache for this character
+    if (window.promptCache) {
+        window.promptCache.invalidateCharacter(currentEditingCharacter.id);
+    }
+
+    const packageSave = await saveCharacterPackagePanel();
+    if (packageSave.status === 'saved') {
+        alert('角色信息与能力层已保存!');
+    } else if (packageSave.status === 'error') {
+        alert('角色信息已保存，但角色包保存失败：' + packageSave.message);
+    } else {
+        alert('角色信息已保存!');
+    }
 }
 
 async function saveAndOpenChat() {
@@ -2685,36 +3874,125 @@ function loadBubblePreset() {
     updateBubblePreview();
 }
 
+function setChatUiMode(mode, refreshPreview = true) {
+    const normalizedMode = mode === 'chatgpt' ? 'chatgpt' : 'theme';
+    const input = document.getElementById('character-detail-chat-ui-mode');
+    if (input) input.value = normalizedMode;
+
+    const themeBtn = document.getElementById('ui-mode-theme-btn');
+    const chatgptBtn = document.getElementById('ui-mode-chatgpt-btn');
+    if (themeBtn) themeBtn.classList.toggle('active', normalizedMode === 'theme');
+    if (chatgptBtn) chatgptBtn.classList.toggle('active', normalizedMode === 'chatgpt');
+
+    applyChatUiMode(normalizedMode);
+
+    if (refreshPreview) {
+        updateBubblePreview();
+    }
+}
+
+function setAvatarDisplayMode(mode, refreshPreview = true) {
+    const validModes = new Set(['both', 'none', 'assistant_only', 'user_only']);
+    const normalizedMode = validModes.has(mode) ? mode : 'both';
+    const input = document.getElementById('character-detail-avatar-display-mode');
+    if (input) input.value = normalizedMode;
+
+    const buttons = {
+        both: document.getElementById('avatar-mode-both-btn'),
+        none: document.getElementById('avatar-mode-none-btn'),
+        assistant_only: document.getElementById('avatar-mode-assistant_only-btn'),
+        user_only: document.getElementById('avatar-mode-user_only-btn')
+    };
+    Object.entries(buttons).forEach(([key, btn]) => {
+        if (btn) btn.classList.toggle('active', key === normalizedMode);
+    });
+
+    if (refreshPreview) {
+        updateBubblePreview();
+    }
+}
+
+function applyChatUiMode(explicitMode = null) {
+    const chatScreen = document.getElementById('character-chat-screen');
+    if (!chatScreen) return;
+
+    const mode = explicitMode
+        || currentChatCharacter?.settings?.chatUiMode
+        || currentEditingCharacter?.settings?.chatUiMode
+        || document.getElementById('character-detail-chat-ui-mode')?.value
+        || 'theme';
+
+    chatScreen.classList.toggle('chat-ui-mode-chatgpt', mode === 'chatgpt');
+
+    const input = document.getElementById('character-chat-input');
+    if (input) {
+        input.placeholder = mode === 'chatgpt' ? '消息' : '输入消息... (回车换行)';
+    }
+}
+
+window.setChatUiMode = setChatUiMode;
+window.setAvatarDisplayMode = setAvatarDisplayMode;
+window.applyChatUiMode = applyChatUiMode;
+
 function updateBubblePreview() {
     const bubbleCssUser = document.getElementById('character-detail-bubble-css-user')?.value.trim() || '';
     const bubbleCssAi = document.getElementById('character-detail-bubble-css-ai')?.value.trim() || '';
     const bubbleSize = parseInt(document.getElementById('character-detail-bubble-size')?.value) || 14;
+    const chatUiMode = document.getElementById('character-detail-chat-ui-mode')?.value || 'theme';
+    const avatarDisplayMode = document.getElementById('character-detail-avatar-display-mode')?.value || 'both';
 
     const userBubble = document.querySelector('.preview-bubble-user');
     const charBubble = document.querySelector('.preview-bubble-char');
+    const userWrapper = userBubble?.parentElement;
+    const charWrapper = charBubble?.parentElement;
+    const showUserAvatar = avatarDisplayMode === 'both' || avatarDisplayMode === 'user_only';
+    const showAssistantAvatar = avatarDisplayMode === 'both' || avatarDisplayMode === 'assistant_only';
+
+    const syncPreviewAvatar = (wrapper, key, show, side) => {
+        if (!wrapper) return;
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'flex-start';
+        wrapper.style.gap = show ? '8px' : '0';
+        let avatar = wrapper.querySelector(`.preview-avatar-${key}`);
+        if (show && !avatar) {
+            avatar = document.createElement('div');
+            avatar.className = `preview-avatar preview-avatar-${key}`;
+            avatar.style.cssText = 'width:30px; height:30px; border-radius:50%; background:var(--card-bg); border:1px solid rgba(0,0,0,0.12); flex-shrink:0;';
+            if (side === 'left') {
+                wrapper.insertBefore(avatar, wrapper.firstChild);
+            } else {
+                wrapper.appendChild(avatar);
+            }
+        } else if (!show && avatar) {
+            avatar.remove();
+        }
+    };
+
+    syncPreviewAvatar(userWrapper, 'user', showUserAvatar, 'right');
+    syncPreviewAvatar(charWrapper, 'assistant', showAssistantAvatar, 'left');
+
+    // Reset preview styles just in case
+    userBubble?.classList.remove('chatgpt-preview-bubble');
+    charBubble?.classList.remove('chatgpt-preview-bubble');
 
     if (userBubble) {
         const userDiv = userBubble.querySelector('div');
         if (userDiv) userDiv.style.fontSize = bubbleSize + 'px';
 
-        // 应用自定义CSS到用户气泡
-        if (bubbleCssUser) {
-            userBubble.style.cssText = `max-width:70%; background:var(--accent); color:var(--bg); padding:12px 16px; border-radius:16px; ${bubbleCssUser}`;
-        } else {
-            userBubble.style.cssText = `max-width:70%; background:var(--accent); color:var(--bg); padding:12px 16px; border-radius:16px;`;
-        }
+        const userBaseStyle = chatUiMode === 'chatgpt'
+            ? 'max-width:70%; background:#f4f4f4; color:var(--text); padding:12px 16px; border-radius:18px;'
+            : 'max-width:70%; background:var(--accent); color:var(--bg); padding:12px 16px; border-radius:16px;';
+        userBubble.style.cssText = bubbleCssUser ? `${userBaseStyle} ${bubbleCssUser}` : userBaseStyle;
     }
 
     if (charBubble) {
         const charDiv = charBubble.querySelector('div');
         if (charDiv) charDiv.style.fontSize = bubbleSize + 'px';
 
-        // 应用自定义CSS到角色气泡
-        if (bubbleCssAi) {
-            charBubble.style.cssText = `max-width:70%; background:var(--card-bg); color:var(--text); padding:12px 16px; border-radius:16px; border-left:3px solid var(--accent); ${bubbleCssAi}`;
-        } else {
-            charBubble.style.cssText = `max-width:70%; background:var(--card-bg); color:var(--text); padding:12px 16px; border-radius:16px; border-left:3px solid var(--accent);`;
-        }
+        const assistantBaseStyle = chatUiMode === 'chatgpt'
+            ? 'max-width:70%; background:transparent; color:var(--text); padding:8px 0; border-radius:0; border:none;'
+            : 'max-width:70%; background:var(--card-bg); color:var(--text); padding:12px 16px; border-radius:16px; border-left:3px solid var(--accent);';
+        charBubble.style.cssText = bubbleCssAi ? `${assistantBaseStyle} ${bubbleCssAi}` : assistantBaseStyle;
     }
 }
 
@@ -2799,6 +4077,21 @@ function hideNavTransition() {
 async function openCharacterChatLegacy(focusInput = true) {
     if (!currentEditingCharacter) return;
 
+    // Set stable chat-state slug for hook dispatch.
+    const _legacyCharId = currentEditingCharacter.id;
+    _pendingChatCharacterId = _legacyCharId;
+    currentChatCharacterSlug = cachedCharacterPackageSummaries?.find(p => p.characterId === _legacyCharId)?.slug || null;
+    if (!currentChatCharacterSlug && getLifeOSAuthToken()) {
+        characterPackageApiFetch('/api/character-packages').then(data => {
+            if (data?.packages) {
+                cachedCharacterPackageSummaries = data.packages;
+                if (_pendingChatCharacterId === _legacyCharId) {
+                    currentChatCharacterSlug = data.packages.find(p => p.characterId === _legacyCharId)?.slug || null;
+                }
+            }
+        }).catch(() => {});
+    }
+
     showNavTransition();
     if (typeof closeCharacterSessionSidebar === 'function') closeCharacterSessionSidebar();
     if (typeof hideCharacterSessionContextMenu === 'function') hideCharacterSessionContextMenu();
@@ -2818,13 +4111,14 @@ async function openCharacterChatLegacy(focusInput = true) {
     if (sessionBtn) sessionBtn.style.display = 'inline-flex';
 
     document.getElementById('chat-avatar').src = currentChatCharacter.avatar || getAvatarPlaceholder(40);
-    document.getElementById('chat-character-name').textContent = currentChatCharacter.name;
+    document.getElementById('chat-character-name').textContent = currentChatCharacter.settings?.nickname || currentChatCharacter.name;
 
     const visibleCount = Array.isArray(currentChatCharacter.chatHistory)
         ? currentChatCharacter.chatHistory.filter(msg => !msg.hidden).length
         : 0;
     isHistoryCollapsed = visibleCount > COLLAPSE_THRESHOLD;
 
+    applyChatUiMode();
     renderCharacterChatHistory();
     chatScreen.style.transition = 'opacity 0.2s ease';
     chatScreen.style.opacity = '1';
@@ -2865,6 +4159,23 @@ async function openCharacterSessionChat(characterId, sessionId, focusInput = tru
         return;
     }
 
+    // Set stable chat-state slug for hook dispatch.
+    // _pendingChatCharacterId is set before the fetch so the then() guard doesn't depend on currentChatCharacter
+    // (which is assigned after several awaits further down this function).
+    _pendingChatCharacterId = characterId;
+    currentChatCharacterSlug = cachedCharacterPackageSummaries?.find(p => p.characterId === characterId)?.slug || null;
+    if (!currentChatCharacterSlug && getLifeOSAuthToken()) {
+        const _charId = characterId;
+        characterPackageApiFetch('/api/character-packages').then(data => {
+            if (data?.packages) {
+                cachedCharacterPackageSummaries = data.packages;
+                if (_pendingChatCharacterId === _charId) {
+                    currentChatCharacterSlug = data.packages.find(p => p.characterId === _charId)?.slug || null;
+                }
+            }
+        }).catch(() => {});
+    }
+
     if (!isCharacterSessionModeEnabled(character)) {
         chatScreen.style.display = 'none';
         currentEditingCharacter = character;
@@ -2896,13 +4207,14 @@ async function openCharacterSessionChat(characterId, sessionId, focusInput = tru
     if (sessionBtn) sessionBtn.style.display = 'inline-flex';
 
     document.getElementById('chat-avatar').src = character.avatar || getAvatarPlaceholder(40);
-    document.getElementById('chat-character-name').textContent = `${character.name} · ${session.name || DEFAULT_CHARACTER_SESSION_NAME}`;
+    document.getElementById('chat-character-name').textContent = character.settings?.nickname || character.name;
 
     const visibleCount = Array.isArray(currentChatCharacter.chatHistory)
         ? currentChatCharacter.chatHistory.filter(msg => !msg.hidden).length
         : 0;
     isHistoryCollapsed = visibleCount > COLLAPSE_THRESHOLD;
 
+    applyChatUiMode();
     renderCharacterChatHistory();
     chatScreen.style.transition = 'opacity 0.2s ease';
     chatScreen.style.opacity = '1';
@@ -3090,6 +4402,8 @@ async function closeCharacterChat() {
     document.getElementById('modal-character-detail').classList.remove('active');
     currentChatCharacter = null;
     currentCharacterSession = null;
+    currentChatCharacterSlug = null;
+    _pendingChatCharacterId = null;
 
     if (chatOpenedFromCharacterManager) {
         chatOpenedFromCharacterManager = false;
@@ -3160,6 +4474,22 @@ function _formatDateSeparator(dateKey) {
         return `${m}月${d}日 ${dayOfWeek}`;
     }
     return `${y}年${m}月${d}日 ${dayOfWeek}`;
+}
+
+function formatThinkingMetric(msgOrDurationMs, fallbackThinkingText = '') {
+    const durationMs = typeof msgOrDurationMs === 'number'
+        ? msgOrDurationMs
+        : msgOrDurationMs?.thinkingDurationMs;
+
+    if (Number.isFinite(durationMs) && durationMs >= 0) {
+        const seconds = Math.max(1, Math.round(durationMs / 1000));
+        return `${seconds}秒`;
+    }
+
+    const thinkingText = typeof fallbackThinkingText === 'string'
+        ? fallbackThinkingText
+        : (msgOrDurationMs?.thinking || '');
+    return `${thinkingText.length}字`;
 }
 
 // 创建日期分隔线 DOM 元素
@@ -3307,7 +4637,12 @@ function appendCharacterMessage(msg, index) {
     }
 
     const isUser = msg.role === 'user';
-    const showAvatar = currentChatCharacter.settings.showAvatar !== false; // 默认显示
+    let displayMode = currentChatCharacter.settings.avatarDisplayMode;
+    if (!displayMode) displayMode = currentChatCharacter.settings.showAvatar === false ? 'none' : 'both';
+    
+    const showUserAvatar = displayMode === 'both' || displayMode === 'user_only';
+    const showAssistantAvatar = displayMode === 'both' || displayMode === 'assistant_only';
+    const showAvatar = isUser ? showUserAvatar : showAssistantAvatar;
     const bubbleSize = currentChatCharacter.settings.bubbleSize || 14;
     const customCssUser = currentChatCharacter.settings.bubbleCssUser || currentChatCharacter.settings.bubbleCss || '';
     const customCssAi = currentChatCharacter.settings.bubbleCssAi || currentChatCharacter.settings.bubbleCss || '';
@@ -3338,13 +4673,19 @@ function appendCharacterMessage(msg, index) {
 
     // 根据消息发送模式调整气泡宽度
     // 当为完整String模式时，assistant消息占据更宽空间
-    let maxWidth = '70%';
+    const isContinuationSegment = !isUser && msg.responseGroupId && msg.segmentIndex > 0;
+    let maxWidth = isContinuationSegment ? '75%' : '70%';
     if (msgMode === 'full' && !isUser) {
         maxWidth = '95%'; // assistant消息在完整模式下占据95%宽度
     }
 
     // 构建气泡样式（自定义CSS会覆盖默认样式）
-    let bubbleStyle = `max-width:${maxWidth}; background:${bgColor}; color:${textColor}; padding:8px 12px; border-radius:16px; ${!isUser ? 'border-left:3px solid var(--accent);' : ''} cursor:pointer; position:relative; font-size:${bubbleSize}px;`;
+    // split模式：短句用 inline-block + nowrap 保持一行小泡，中长句正常换行
+    const plainText = (msg.content || '').trim();
+    const isShortPure = msgMode === 'split' && plainText.length <= 20 && !plainText.includes('\n') && !plainText.includes('![') && !plainText.includes('```') && !msg.quote;
+    const shortStyle = isShortPure ? 'display:inline-block; white-space:nowrap;' : '';
+    const effectiveMaxWidth = isShortPure ? '' : `max-width:${maxWidth};`;
+    let bubbleStyle = `${effectiveMaxWidth} ${shortStyle} background:${bgColor}; color:${textColor}; padding:8px 12px; border-radius:16px; ${!isUser ? 'border-left:3px solid var(--accent);' : ''} cursor:pointer; position:relative; font-size:${bubbleSize}px;`;
 
     // 应用自定义CSS（如果有的话）
     const customCss = isUser ? customCssUser : customCssAi;
@@ -3399,7 +4740,7 @@ function appendCharacterMessage(msg, index) {
                 <div class="chat-message-bubble" data-msg-index="${index}" data-msg-role="${msg.role}" data-msg-content="${escapeHtml(msg.content)}" ${msg.quote ? `data-quote-index="${msg.quote.index}"` : ''} style="${bubbleStyle}">
                     ${quoteHtml}
                     <div class="markdown-content">${cardHtml || renderMarkdown(msg.content)}</div>
-                    <div style="font-size:${bubbleSize * 0.75}px; opacity:0.6; margin-top:5px; text-align:right;">${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    <div class="chat-message-time" style="font-size:${bubbleSize * 0.75}px; opacity:0.6; margin-top:5px; text-align:right;">${new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
             `;
 
@@ -3407,10 +4748,11 @@ function appendCharacterMessage(msg, index) {
     let thinkingHtml = '';
     if (!isUser && msg.thinking) {
         _ensureStreamCSS();
+        const thinkingMetric = formatThinkingMetric(msg);
         thinkingHtml = `
             <div class="stream-thinking">
                 <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                    💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${msg.thinking.length}字)</span>
+                    💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${thinkingMetric})</span>
                     <span class="thinking-toggle">▶</span>
                 </div>
                 <div class="thinking-body">${escapeHtml(msg.thinking)}</div>
@@ -3419,20 +4761,19 @@ function appendCharacterMessage(msg, index) {
     }
 
     // Multi-segment continuation: no avatar, margin-left aligned
-    const isContinuationSegment = !isUser && msg.responseGroupId && msg.segmentIndex > 0;
-    const avatarSpaceWidth = showAvatar ? '43px' : '0'; // 35px avatar + 8px gap
+    const avatarSpaceWidth = showAssistantAvatar ? '43px' : '0'; // 35px avatar + 8px gap
 
     if (isUser) {
-        innerHTML = bubbleHtml + (showAvatar ? avatarHtml : '');
+        innerHTML = bubbleHtml + (showUserAvatar ? avatarHtml : '');
     } else if (isContinuationSegment) {
         // Continuation segment: align with previous bubble content (no avatar)
         messageDiv.style.marginBottom = '8px';
-        innerHTML = `<div style="margin-left:${avatarSpaceWidth}; max-width:${maxWidth}; min-width:0; flex:1;">${bubbleHtml}</div>`;
+        innerHTML = `<div style="margin-left:${avatarSpaceWidth}; min-width:0;">${bubbleHtml}</div>`;
     } else if (thinkingHtml) {
         // Wrap thinking + bubble in vertical column so thinking is ABOVE the bubble
-        innerHTML = (showAvatar ? avatarHtml : '') + `<div style="display:flex; flex-direction:column; gap:6px; max-width:${maxWidth}; min-width:0; flex:1;">${thinkingHtml}${bubbleHtml}</div>`;
+        innerHTML = (showAssistantAvatar ? avatarHtml : '') + `<div style="display:flex; flex-direction:column; gap:6px; min-width:0;">${thinkingHtml}${bubbleHtml}</div>`;
     } else {
-        innerHTML = (showAvatar ? avatarHtml : '') + bubbleHtml;
+        innerHTML = (showAssistantAvatar ? avatarHtml : '') + bubbleHtml;
     }
 
     messageDiv.innerHTML = innerHTML;
@@ -3996,10 +5337,14 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
         console.log(`[AI调用] 使用最近 ${recentHistory.length}/${currentChatCharacter.chatHistory.length} 条消息作为上下文`);
 
-        const visionAllowed = isVisionModel(store.apiConfig.main.model, detectAIProvider(store.apiConfig.main.url));
+        const visionAllowed = isVisionModel(store.apiConfig.main.model, detectAIProvider(store.apiConfig.main.url), store.apiConfig.main.url);
         let removedImages = false;
+        let bridgeUpdated = false;
+        let bridgeApplied = false;
+        const latestUserMessage = findLatestUserMessage(recentHistory);
+        const messages = [];
 
-        const messages = recentHistory.map(msg => {
+        for (const msg of recentHistory) {
             // 构建消息内容（支持引用）
             let textContent = msg.content;
 
@@ -4025,46 +5370,27 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                 }
             }
 
-            // Check for markdown image syntax: ![Image](data:image/...)
-            // Support multiple images
-            const imgRegex = /!\[Image\]\((data:image\/[^;]+;base64,[^)]+|\/api\/files\/[a-f0-9]+)\)/g;
-            const matches = [...textContent.matchAll(imgRegex)];
+            const bridged = await buildModelMessageWithVisionBridge(textContent, msg, {
+                mainModelIsVision: visionAllowed,
+                targetBridgeMessage: latestUserMessage,
+                onBridgeStart: () => updateChatStatus('🖼️ 正在用视觉模型识图...', 'thinking'),
+                onBridgeSuccess: () => updateChatStatus('✅ 图片识图已注入本轮上下文', 'info'),
+                onBridgeFailure: () => updateChatStatus('⚠️ 视觉桥接失败，已回退文本链路', 'info')
+            });
 
-            if (matches.length > 0) {
-                const contentParts = [];
+            if (bridged.removedImages) removedImages = true;
+            if (bridged.bridgeUpdated) bridgeUpdated = true;
+            if (bridged.bridgeApplied) bridgeApplied = true;
+            messages.push({
+                role: msg.role,
+                content: bridged.content
+            });
+        }
 
-                // Clean text by removing all image markdown
-                const cleanText = textContent.replace(imgRegex, '').trim();
-                const omissionNote = '[Image omitted: model not vision-capable]';
-                const textForModel = cleanText
-                    ? (visionAllowed ? cleanText : `${cleanText}\n${omissionNote}`)
-                    : (visionAllowed ? 'Images uploaded' : omissionNote);
-                contentParts.push({ type: "text", text: textForModel });
-
-                if (visionAllowed) {
-                    matches.forEach(match => {
-                        let imageUrl = match[1];
-                        if (imageUrl.startsWith('/api/files/')) {
-                            imageUrl = window.location.origin + imageUrl;
-                        }
-                        contentParts.push({
-                            type: "image_url",
-                            image_url: { url: imageUrl }
-                        });
-                    });
-                } else {
-                    removedImages = true;
-                }
-
-                return {
-                    role: msg.role,
-                    content: contentParts
-                };
-            }
-            return { role: msg.role, content: textContent };
-        });
-
-        if (removedImages) {
+        if (bridgeUpdated) {
+            await saveCurrentChatState();
+        }
+        if (removedImages && !visionAllowed && !bridgeUpdated && !bridgeApplied) {
             updateChatStatus('已自动移除图片（模型非视觉）', 'info');
         }
 
@@ -4083,13 +5409,14 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             ]
         };
 
-        // 根据开关状态添加温度参数
-        if (store.apiConfig.main.temperatureEnabled !== false) {
+        // 根据开关状态 + 模型能力添加温度参数
+        const _mainCaps = getModelCapabilities(store.apiConfig.main.model, store.apiConfig.main.url);
+        if (store.apiConfig.main.temperatureEnabled !== false && _mainCaps.supportsTemperature !== false) {
             requestBody.temperature = currentChatCharacter.settings.temperature || store.apiConfig.main.temperature || 0.8;
         }
 
-        // 根据开关状态添加Top-P参数
-        if (store.apiConfig.main.topPEnabled === true) {
+        // 根据开关状态 + 模型能力添加Top-P参数
+        if (store.apiConfig.main.topPEnabled === true && _mainCaps.supportsTopP !== false) {
             requestBody.top_p = store.apiConfig.main.topP || 1;
         }
 
@@ -4101,8 +5428,9 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
         // Inject tool usage guidance to prevent hallucinated tool calls
         const enabledMcpTools = currentChatCharacter.settings.enabledMcpTools;
+        const _toolCaps = getModelCapabilities(store.apiConfig.main.model, store.apiConfig.main.url);
         let toolGuidance = '';
-        if (enabledMcpTools === null || enabledMcpTools === undefined || (Array.isArray(enabledMcpTools) && enabledMcpTools.length > 0)) {
+        if (_toolCaps.supportsTools !== false && (enabledMcpTools === null || enabledMcpTools === undefined || (Array.isArray(enabledMcpTools) && enabledMcpTools.length > 0))) {
             toolGuidance = `\n\n[系统工具说明] 你拥有可以真正执行的工具（function calling）。当你需要保存记忆、搜索信息、查阅笔记等操作时，请直接调用对应的工具函数，系统会自动执行并返回结果。绝对不要用动作描写（如 *打开笔记本* *搜索记忆* *记录到记忆库*）来模拟工具调用，那样不会产生任何实际效果。如果你当前无法通过 function calling 调用工具，就直接用文字告诉用户"我现在无法调用工具，请你手动操作"，绝对不要假装已经完成了工具操作。\n\n[重要：搜索工具优先级] 当用户要求搜索新闻、查找信息、了解时事等需要关键词搜索的场景时，必须使用 web_search 工具（传入搜索关键词即可），它会调用搜索引擎返回结果。绝对不要用 fetch 工具来代替搜索——fetch 只能访问已知的具体URL，不能做关键词搜索。`;
         }
 
@@ -4119,12 +5447,15 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             // --- SSE Streaming Mode (Multi-Segment Agent Flow) ---
             _ensureStreamCSS();
 
-            const showAvatar = currentChatCharacter.settings.showAvatar !== false;
+            let displayMode = currentChatCharacter.settings.avatarDisplayMode;
+            if (!displayMode) displayMode = currentChatCharacter.settings.showAvatar === false ? 'none' : 'both';
+            const showAssistantAvatar = displayMode === 'both' || displayMode === 'assistant_only';
             const avatarUrl = currentChatCharacter.avatar || getAvatarPlaceholder(40);
             const bubbleSize = currentChatCharacter.settings.bubbleSize || 14;
             const customCssAi = currentChatCharacter.settings.bubbleCssAi || currentChatCharacter.settings.bubbleCss || '';
-            const streamMaxWidth = (currentChatCharacter.settings.msgMode === 'full') ? '95%' : '85%';
-            const avatarSpace = showAvatar ? '43px' : '0'; // 35px avatar + 8px gap
+            const streamMaxWidth = (currentChatCharacter.settings.msgMode === 'full') ? '95%' : '70%';
+            const streamContMaxWidth = (currentChatCharacter.settings.msgMode === 'full') ? '95%' : '75%';
+            const avatarSpace = showAssistantAvatar ? '43px' : '0'; // 35px avatar + 8px gap
 
             // Multi-segment state
             const responseGroupId = 'rg-' + Date.now();
@@ -4134,6 +5465,8 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             let accThinking = '';
             let streamDoneData = null;
             let _toolGroupCounter = 0;
+            const thinkingStartedAt = Date.now();
+            let thinkingDurationMs = 0;
             const thinkParser = createThinkParser();
 
             // Helper: create a new segment bubble in the container
@@ -4149,11 +5482,11 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
                 if (isFirst) {
                     wrapper.innerHTML = `
-                        ${showAvatar ? `<img src="${avatarUrl}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; border:1px solid rgba(0,0,0,0.1); flex-shrink:0;">` : ''}
-                        <div style="max-width:${streamMaxWidth}; min-width:0; flex:1; display:flex; flex-direction:column; gap:4px;">
+                        ${showAssistantAvatar ? `<img src="${avatarUrl}" style="width:35px; height:35px; border-radius:50%; object-fit:cover; border:1px solid rgba(0,0,0,0.1); flex-shrink:0;">` : ''}
+                        <div style="min-width:0; display:flex; flex-direction:column; gap:4px;">
                             <div id="${segBubbleId}-thinking" class="stream-thinking" style="display:none;"></div>
                             <div id="${segBubbleId}-memory" style="display:none;"></div>
-                            <div id="${segBubbleId}-text" class="chat-bubble assistant chat-message-bubble" data-msg-role="assistant" style="background:var(--card-bg); color:var(--text); border-radius:15px 15px 15px 5px; border-left:3px solid var(--accent); padding:10px 15px; font-size:${bubbleSize}px; line-height:1.6; word-break:break-word; ${customCssAi}">
+                            <div id="${segBubbleId}-text" class="chat-bubble assistant chat-message-bubble" data-msg-role="assistant" style="max-width:${streamMaxWidth}; background:var(--card-bg); color:var(--text); border-radius:15px 15px 15px 5px; border-left:3px solid var(--accent); padding:10px 15px; font-size:${bubbleSize}px; line-height:1.6; word-break:break-word; ${customCssAi}">
                                 <span class="stream-cursor"></span>
                             </div>
                         </div>
@@ -4161,8 +5494,8 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                 } else {
                     // Continuation segment: no avatar, aligned with bubble content
                     wrapper.innerHTML = `
-                        <div style="margin-left:${avatarSpace}; max-width:${streamMaxWidth}; min-width:0; flex:1;">
-                            <div id="${segBubbleId}-text" class="chat-bubble assistant chat-message-bubble" data-msg-role="assistant" style="background:var(--card-bg); color:var(--text); border-radius:15px 15px 15px 5px; border-left:3px solid var(--accent); padding:10px 15px; font-size:${bubbleSize}px; line-height:1.6; word-break:break-word; ${customCssAi}">
+                        <div style="margin-left:${avatarSpace}; min-width:0;">
+                            <div id="${segBubbleId}-text" class="chat-bubble assistant chat-message-bubble" data-msg-role="assistant" style="max-width:${streamContMaxWidth}; background:var(--card-bg); color:var(--text); border-radius:15px 15px 15px 5px; border-left:3px solid var(--accent); padding:10px 15px; font-size:${bubbleSize}px; line-height:1.6; word-break:break-word; ${customCssAi}">
                                 <span class="stream-cursor"></span>
                             </div>
                         </div>
@@ -4325,10 +5658,13 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                             break;
 
                         case 'error':
-                            if (segments.length > 0) {
-                                const lastSeg = segments[segments.length - 1];
-                                const textEl = document.getElementById(`${lastSeg.bubbleId}-text`);
-                                if (textEl) textEl.innerHTML = `<span style="color:#c62828;">❌ ${escapeHtml(data.message || '流式响应错误')}</span>`;
+                            {
+                                const errorText = `❌ ${data.message || '流式响应错误'}`;
+                                if (!currentBubbleId) _createSegmentBubble(segments.length === 0);
+                                const currentSeg = segments[segments.length - 1];
+                                currentSeg.accText = errorText;
+                                const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                if (textEl) textEl.innerHTML = `<span style="color:#c62828;">${escapeHtml(errorText)}</span>`;
                             }
                             break;
                     }
@@ -4339,9 +5675,11 @@ async function triggerCharacterAIResponse(extraSystemContext) {
             if (segments.length > 0) {
                 const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
                 if (thinkEl && accThinking) {
+                    thinkingDurationMs = Math.max(0, Date.now() - thinkingStartedAt);
+                    const thinkingMetric = formatThinkingMetric(thinkingDurationMs, accThinking);
                     thinkEl.innerHTML = `
                         <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                            💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${accThinking.length}字)</span>
+                            💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${thinkingMetric})</span>
                             <span class="thinking-toggle">▶</span>
                         </div>
                         <div class="thinking-body">${escapeHtml(accThinking)}</div>
@@ -4374,6 +5712,7 @@ async function triggerCharacterAIResponse(extraSystemContext) {
                     segmentIndex: i
                 };
                 if (i === 0 && accThinking) aiMsg.thinking = accThinking;
+                if (i === 0 && accThinking && thinkingDurationMs) aiMsg.thinkingDurationMs = thinkingDurationMs;
                 if (seg.toolsAfter.length > 0) aiMsg.toolsAfter = seg.toolsAfter;
                 // Legacy compat: also set toolsUsed on first segment for old rendering paths
                 if (i === 0 && allToolsUsed.length > 0) aiMsg.toolsUsed = allToolsUsed;
@@ -4561,7 +5900,9 @@ async function triggerCharacterAIResponse(extraSystemContext) {
 
         if (currentChatCharacter.settings.autoSummary) {
             const threshold = currentChatCharacter.settings.summaryInterval || 10;
-            if (currentChatCharacter.chatHistory.length % threshold === 0) {
+            // Count rounds (1 round = 1 user msg + 1 assistant reply)
+            const rounds = Math.floor(currentChatCharacter.chatHistory.filter(m => m.role === 'assistant').length);
+            if (rounds > 0 && rounds % threshold === 0) {
                 generateSummaryForCurrentContext(currentChatCharacter);
             }
         }
@@ -4593,103 +5934,182 @@ function updateChatStatus(text, type = 'online') {
     }
 }
 
-// 构建角色系统提示词 (支持心声)
+// 构建角色系统提示词 (支持心声, prompt caching)
 async function buildCharacterSystemPrompt() {
-    let prompt = '';
+    // === Pre-load linked worldbooks ===
+    const linkedWbIds = currentChatCharacter.settings.linkedWorldBookIds || [];
+    const loadedWorldBooks = [];
+    for (const wbId of linkedWbIds) {
+        const wb = await db.worldBooks.get(wbId);
+        if (wb) loadedWorldBooks.push(wb);
+    }
 
-    // 1. 角色核心设定
-    prompt += `# 角色核心设定\n\n`;
-    prompt += `你是 ${currentChatCharacter.name}。\n\n`;
+    // === Get cached stable prefix (character core + always worldbook + output rules) ===
+    // v3.2c: when useServerWorldbook=true, pass [] so alwaysWorldbook never enters the cached prefix.
+    // Server Context Runtime will live-inject worldbook instead.
+    const _useServerWb = currentChatCharacter.settings.useServerWorldbook === true;
+    const cached = window.promptCache.getOrCompile(
+        currentChatCharacter, _useServerWb ? [] : loadedWorldBooks,
+        { mode: currentReadingRoom ? 'reading_room' : 'chat' }
+    );
 
-    if (currentChatCharacter.description) prompt += `## 角色描述\n${currentChatCharacter.description}\n\n`;
-    if (currentChatCharacter.personality) prompt += `## 性格特点\n${currentChatCharacter.personality}\n\n`;
-    if (currentChatCharacter.scenario) prompt += `## 当前场景\n${currentChatCharacter.scenario}\n\n`;
-    if (currentChatCharacter.mes_example) prompt += `## 对话示例\n${currentChatCharacter.mes_example}\n\n`;
+    // === Assemble: stable prefix first ===
+    let prompt = window.promptCache.assemblePrefix(cached);
 
-    // 2. 世界书内容注入（支持蓝灯常驻/绿灯关键词/紫灯语义触发）
-    if (currentChatCharacter.settings.linkedWorldBookIds && currentChatCharacter.settings.linkedWorldBookIds.length > 0) {
-        // 获取最近对话作为扫描上下文
-        const scanDepth = currentChatCharacter.settings.worldBookScanDepth || 10;
-        const recentMessages = currentChatCharacter.chatHistory.slice(-scanDepth);
-        const contextTextRaw = recentMessages.map(m => m.content).join(' ');
-        const contextText = contextTextRaw.toLowerCase(); // 用于关键词匹配
+    // v3.2 Context Runtime: accumulate chars of worldbook text actually injected this round.
+    // v3.2c: useServerWorldbook=true → frontend worldbook fully absent; snapshotChars=0.
+    let _wbSnapshotChars = 0;
+    if (_useServerWb) {
+        // Server handles worldbook injection — frontend skips all worldbook blocks below.
+        console.log('[v3.2c] useServerWorldbook=true — skipping frontend worldbook injection (always + dynamic)');
+    } else {
+    const _awb = cached.alwaysWorldbook || {};
+    if (_awb.system_before) _wbSnapshotChars += (`# 世界书设定：系统前置\n\n${_awb.system_before}\n\n`).length;
+    if (_awb.system_after)  _wbSnapshotChars += (`# 世界书设定：系统补充\n\n${_awb.system_after}\n\n`).length;
+    if (_awb.user)          _wbSnapshotChars += (`# 世界书设定：用户侧上下文\n\n${_awb.user}\n\n`).length;
+    if (_awb.assistant)     _wbSnapshotChars += (`# 世界书设定：助手侧引导\n\n${_awb.assistant}\n\n`).length;
 
-        let worldBookContent = '';
-        let activatedCount = 0;
+    // === Dynamic worldbook: keyword/semantic/hybrid entries only (skip 'always') ===
+    if (loadedWorldBooks.length > 0) {
+        const defaultScanDepth = currentChatCharacter.settings.worldBookScanDepth || 10;
+        const defaultSemanticThreshold = currentChatCharacter.settings.semanticThreshold || 0.55;
 
-        // 预扫描：是否有需要语义匹配的条目
-        let hasSemanticEntries = false;
-        for (const wbId of currentChatCharacter.settings.linkedWorldBookIds) {
-            const wb = await db.worldBooks.get(wbId);
-            if (wb && wb.entries && wb.entries.some(e => e.enabled && e.triggerMode === 'semantic' && e.embedding)) {
-                hasSemanticEntries = true;
-                break;
-            }
-        }
+        let hasSemanticEntries = loadedWorldBooks.some(wb =>
+            wb.entries && wb.entries.some(e => e.enabled && e.triggerMode !== 'always' &&
+                (e.triggerMode === 'semantic' || e.triggerMode === 'hybrid') && e.embedding)
+        );
 
-        // 如有语义条目，计算一次上下文向量
-        let contextEmbedding = null;
+        const semanticEmbeddingCache = {};
+        let semanticModelReady = false;
         if (hasSemanticEntries) {
             try {
-                contextEmbedding = await semanticEmbeddingService.embed(contextTextRaw);
+                const defaultContext = currentChatCharacter.chatHistory.slice(-defaultScanDepth).map(m => m.content).join(' ');
+                semanticEmbeddingCache[defaultScanDepth] = await semanticEmbeddingService.embed(defaultContext);
+                semanticModelReady = true;
             } catch (e) {
                 console.warn('[世界书] 语义模型加载失败，跳过语义触发条目:', e.message);
             }
         }
 
-        const semanticThreshold = currentChatCharacter.settings.semanticThreshold || 0.55;
+        let dynamicActivated = [];
 
-        for (const wbId of currentChatCharacter.settings.linkedWorldBookIds) {
-            const wb = await db.worldBooks.get(wbId);
-            if (wb && wb.entries && wb.entries.length > 0) {
-                let bookContent = '';
+        for (const wb of loadedWorldBooks) {
+            if (!wb.entries || wb.entries.length === 0) continue;
 
-                wb.entries.filter(entry => entry.enabled).forEach(entry => {
-                    const triggerMode = entry.triggerMode || 'keyword';
-                    let shouldActivate = false;
+            for (const entry of wb.entries.filter(e => e.enabled && e.triggerMode !== 'always')) {
+                const triggerMode = entry.triggerMode || 'keyword';
+                let shouldActivate = false;
 
-                    if (triggerMode === 'always') {
-                        // 蓝灯常驻：始终激活
-                        shouldActivate = true;
-                    } else if (triggerMode === 'semantic') {
-                        // 紫灯语义：余弦相似度匹配
-                        if (contextEmbedding && entry.embedding) {
-                            const similarity = semanticEmbeddingService.cosineSimilarity(contextEmbedding, entry.embedding);
-                            shouldActivate = similarity >= semanticThreshold;
-                            if (shouldActivate) {
-                                console.log(`[世界书] 语义匹配: "${entry.name}" (相似度: ${similarity.toFixed(3)})`);
-                            }
+                const effectiveScanDepth = entry.scanDepthOverride || defaultScanDepth;
+                const effectiveThreshold = entry.semanticThresholdOverride || defaultSemanticThreshold;
+
+                const entryMessages = currentChatCharacter.chatHistory.slice(-effectiveScanDepth);
+                const entryContextRaw = entryMessages.map(m => m.content).join(' ');
+                const entryContext = entryContextRaw.toLowerCase();
+
+                const matchKeywords = (keys) => {
+                    if (!keys || keys.length === 0) return false;
+                    return keys.some(key => {
+                        const k = key.trim();
+                        if (!k) return false;
+                        if (entry.useRegex) {
+                            try {
+                                const flags = entry.caseSensitive ? '' : 'i';
+                                return new RegExp(k, flags).test(entryContextRaw);
+                            } catch { return false; }
                         }
-                    } else {
-                        // 绿灯关键词触发：检查关键词是否出现在上下文中
-                        if (entry.keys && entry.keys.length > 0) {
-                            shouldActivate = entry.keys.some(key => {
-                                const keyLower = key.toLowerCase().trim();
-                                return keyLower && contextText.includes(keyLower);
-                            });
+                        const target = entry.caseSensitive ? entryContextRaw : entryContext;
+                        const needle = entry.caseSensitive ? k : k.toLowerCase();
+                        if (entry.matchWholeWords) {
+                            const regex = new RegExp('\\b' + needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', entry.caseSensitive ? '' : 'i');
+                            return regex.test(entryContextRaw);
                         }
-                    }
+                        return target.includes(needle);
+                    });
+                };
 
-                    if (shouldActivate) {
-                        bookContent += `\n### ${entry.name}\n${entry.content}\n`;
-                        activatedCount++;
+                const matchSemantic = async () => {
+                    if (!semanticModelReady || !entry.embedding) return false;
+                    if (!semanticEmbeddingCache[effectiveScanDepth]) {
+                        const depthContext = currentChatCharacter.chatHistory.slice(-effectiveScanDepth).map(m => m.content).join(' ');
+                        semanticEmbeddingCache[effectiveScanDepth] = await semanticEmbeddingService.embed(depthContext);
                     }
-                });
+                    const ctxEmb = semanticEmbeddingCache[effectiveScanDepth];
+                    const similarity = semanticEmbeddingService.cosineSimilarity(ctxEmb, entry.embedding);
+                    if (similarity >= effectiveThreshold) {
+                        console.log(`[世界书] 语义匹配: "${entry.name}" (相似度: ${similarity.toFixed(3)}, 阈值: ${effectiveThreshold}, depth: ${effectiveScanDepth})`);
+                        return true;
+                    }
+                    return false;
+                };
 
-                if (bookContent) {
-                    worldBookContent += `## ${wb.name}\n${bookContent}\n`;
+                const allKeys = [...(entry.keys || []), ...(entry.secondaryKeys || [])];
+
+                if (triggerMode === 'keyword') {
+                    shouldActivate = matchKeywords(allKeys);
+                } else if (triggerMode === 'semantic') {
+                    shouldActivate = await matchSemantic();
+                } else if (triggerMode === 'hybrid') {
+                    shouldActivate = matchKeywords(allKeys) || await matchSemantic();
+                }
+
+                if (shouldActivate) {
+                    dynamicActivated.push({ entry, wbName: wb.name, priority: entry.priority || 0 });
                 }
             }
         }
 
-        if (worldBookContent) {
-            prompt += `# 世界观设定 (必须严格遵守)\n\n`;
-            prompt += worldBookContent;
-            console.log(`[世界书] 已激活 ${activatedCount} 个条目`);
+        if (dynamicActivated.length > 0) {
+            dynamicActivated.sort((a, b) => b.priority - a.priority);
+
+            const buckets = { system_before: [], system_after: [], user: [], assistant: [] };
+            for (const item of dynamicActivated) {
+                const pos = item.entry.insertionPosition || 'system_after';
+                (buckets[pos] || buckets.system_after).push(item);
+            }
+
+            const bucketCounts = Object.entries(buckets)
+                .filter(([, v]) => v.length > 0)
+                .map(([k, v]) => `${k}=${v.length}`)
+                .join(', ');
+            console.log(`[世界书] 动态激活 ${dynamicActivated.length} 条：${bucketCounts}`);
+
+            const renderBucket = (items) =>
+                items.map(item => `### ${item.entry.name}\n${item.entry.content}`).join('\n\n');
+
+            if (buckets.system_before.length > 0) {
+                const _t = `# 世界书设定：系统前置（动态）\n\n${renderBucket(buckets.system_before)}\n\n`;
+                prompt = _t + prompt;
+                _wbSnapshotChars += _t.length;
+            }
+            if (buckets.system_after.length > 0) {
+                const _t = `# 世界书设定：系统补充（动态）\n\n${renderBucket(buckets.system_after)}\n\n`;
+                prompt += _t;
+                _wbSnapshotChars += _t.length;
+            }
+            if (buckets.user.length > 0) {
+                const _t = `# 世界书设定：用户侧上下文（动态）\n\n${renderBucket(buckets.user)}\n\n`;
+                prompt += _t;
+                _wbSnapshotChars += _t.length;
+            }
+            if (buckets.assistant.length > 0) {
+                const _t = `# 世界书设定：助手侧引导（动态）\n\n${renderBucket(buckets.assistant)}\n\n`;
+                prompt += _t;
+                _wbSnapshotChars += _t.length;
+            }
+        }
+
+        if (cached.alwaysWorldbookCount > 0 || dynamicActivated.length > 0) {
+            console.log(`[世界书] 总计: ${cached.alwaysWorldbookCount} always(cached) + ${dynamicActivated.length} dynamic`);
         }
     }
 
-    // 2.5 关联 Bingo 卡注入
+    } // end else (!_useServerWb)
+
+    // v3.2: store worldbook snapshot chars for callAIViaProxy to read
+    currentChatCharacter._lastWorldbookSnapshotChars = _wbSnapshotChars;
+
+    // === Dynamic: Bingo cards ===
     if (currentChatCharacter.settings.bingoLinkIds && currentChatCharacter.settings.bingoLinkIds.length > 0) {
         prompt += `# 关联的任务/Bingo卡 (用户当前正在进行的计划)\n`;
         currentChatCharacter.settings.bingoLinkIds.forEach(pid => {
@@ -4701,13 +6121,12 @@ async function buildCharacterSystemPrompt() {
         prompt += `\n`;
     }
 
-    // 2.6 长期记忆注入：先自有记忆，再挂载引用记忆
+    // === Dynamic: Long-term memory ===
     const ownMemories = Array.isArray(currentChatCharacter.longTermMemory) ? currentChatCharacter.longTermMemory : [];
     const ownLimitRaw = Number(currentChatCharacter.settings.pinnedMemory);
     const ownLimit = Number.isFinite(ownLimitRaw) ? Math.max(0, ownLimitRaw) : 3;
     const ownMounted = ownLimit > 0 ? ownMemories.slice(-ownLimit) : [];
 
-    // 阅读室模式：额外注入角色本体的长期记忆（只读参考）
     let characterBaseMemories = [];
     if (currentReadingRoom && currentEditingCharacter) {
         const charMem = Array.isArray(currentEditingCharacter.longTermMemory) ? currentEditingCharacter.longTermMemory : [];
@@ -4722,29 +6141,20 @@ async function buildCharacterSystemPrompt() {
         prompt += `# 长期记忆 (Long-term Memory)\n`;
         if (characterBaseMemories.length > 0) {
             prompt += `## 角色基础记忆（只读）\n`;
-            characterBaseMemories.forEach(m => {
-                prompt += `- ${m}\n`;
-            });
+            characterBaseMemories.forEach(m => { prompt += `- ${m}\n`; });
         }
         if (ownMounted.length > 0) {
             if (currentReadingRoom) prompt += `## 阅读室记忆\n`;
-            ownMounted.forEach(m => {
-                prompt += `- ${m}\n`;
-            });
+            ownMounted.forEach(m => { prompt += `- ${m}\n`; });
         }
-        referencedMounted.forEach(m => {
-            prompt += `- ${m}\n`;
-        });
+        referencedMounted.forEach(m => { prompt += `- ${m}\n`; });
         prompt += `\n`;
     }
 
-    // 3. 核心输出规则
-    prompt += `# 输出规则\n`;
-    prompt += `- 请以 ${currentChatCharacter.name} 的身份与我对话。\n`;
-    prompt += `- 保持性格鲜明，拒绝死板的AI味。\n`;
-    prompt += `- 直接输出回复内容即可，不需要JSON格式。\n`;
+    // === Stable: Output rules (from cache) ===
+    prompt += cached.outputRules;
 
-    // 时间感知 (如果启用)
+    // === Dynamic: Time awareness ===
     if (currentChatCharacter.settings.timeAwareness) {
         const now = new Date();
         const timeString = now.toLocaleString('zh-CN', { hour12: false });
@@ -4878,6 +6288,11 @@ async function init() {
         // 启动任务投递轮询
         startTaskDeliveryPolling();
 
+        // 提案收件箱 badge（有 token 才有效，失败静默）
+        if (getLifeOSAuthToken()) {
+            updateProposalBadge().catch(() => {});
+        }
+
         console.log('[初始化] ✓ 系统初始化完成');
 
     } catch (error) {
@@ -4909,13 +6324,14 @@ async function loadData() {
                 if (!store.weeklyBills) store.weeklyBills = [];
                 if (!store.lastDailyCheck) store.lastDailyCheck = '';
                 if (!store.lastWeeklyReset) store.lastWeeklyReset = '';
-                if (!store.apiConfig) store.apiConfig = { main: { url: '', key: '', model: 'gpt-4', temperature: 0.8 }, sub: { url: '', key: '', model: 'gpt-3.5-turbo', temperature: 0.8 }, search: { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' } };
-                if (!store.apiConfig.search) store.apiConfig.search = { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' };
+                store.apiConfig = ensureApiConfigShape(store.apiConfig);
                 if (!store.aiChatHistory) store.aiChatHistory = [];
                 if (!store.characterGroups) store.characterGroups = ['默认分组', '特别关心'];
                 if (!store.bubblePresets) store.bubblePresets = {};
                 if (!store.reportArchive) store.reportArchive = [];
+                if (!store.modelRegistry) store.modelRegistry = {};
                 if (!store.readingContextConfig) store.readingContextConfig = { paragraphsBefore: 3, paragraphsAfter: 5, maxChars: 3000 };
+                store.readerVisionCache = ensureReaderVisionCacheShape(store.readerVisionCache);
                 console.log('[数据加载] 云端数据加载成功');
                 loadApiConfigToUI();
                 return;
@@ -4949,13 +6365,14 @@ async function loadData() {
                 if (!store.weeklyBills) store.weeklyBills = [];
                 if (!store.lastDailyCheck) store.lastDailyCheck = '';
                 if (!store.lastWeeklyReset) store.lastWeeklyReset = '';
-                if (!store.apiConfig) store.apiConfig = { main: { url: '', key: '', model: 'gpt-4', temperature: 0.8 }, sub: { url: '', key: '', model: 'gpt-3.5-turbo', temperature: 0.8 }, search: { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' } };
-                if (!store.apiConfig.search) store.apiConfig.search = { provider: 'google', googleApiKey: '', googleCx: '', serperApiKey: '', zhipuApiKey: '' };
+                store.apiConfig = ensureApiConfigShape(store.apiConfig);
                 if (!store.aiChatHistory) store.aiChatHistory = [];
                 if (!store.characterGroups) store.characterGroups = ['默认分组', '特别关心'];
                 if (!store.bubblePresets) store.bubblePresets = {};
                 if (!store.reportArchive) store.reportArchive = [];
+                if (!store.modelRegistry) store.modelRegistry = {};
                 if (!store.readingContextConfig) store.readingContextConfig = { paragraphsBefore: 3, paragraphsAfter: 5, maxChars: 3000 };
+                store.readerVisionCache = ensureReaderVisionCacheShape(store.readerVisionCache);
 
                 console.log('[数据加载] 成功加载用户数据');
             } catch (parseError) {
@@ -5333,8 +6750,39 @@ function renderMarkdown(text) {
     if (_markdownCache.has(text)) return _markdownCache.get(text);
     if (!md) return escapeHtml(text).replace(/\n/g, '<br>');
     try {
-        // 先渲染 Markdown
-        let html = md.render(text);
+        // 在 Markdown 渲染前保护 LaTeX 公式（防止 markdown-it 转义反斜杠）
+        const latexProtected = [];
+        let protectedText = text;
+
+        // 保护块级 $$...$$
+        protectedText = protectedText.replace(/\$\$([\s\S]*?)\$\$/g, (m) => {
+            latexProtected.push(m);
+            return '@@LATEX_PRE_' + (latexProtected.length - 1) + '@@';
+        });
+        // 保护块级 \[...\]
+        protectedText = protectedText.replace(/\\\[([\s\S]*?)\\\]/g, (m) => {
+            latexProtected.push(m);
+            return '@@LATEX_PRE_' + (latexProtected.length - 1) + '@@';
+        });
+        // 保护行内 \(...\)
+        protectedText = protectedText.replace(/\\\(([\s\S]*?)\\\)/g, (m) => {
+            latexProtected.push(m);
+            return '@@LATEX_PRE_' + (latexProtected.length - 1) + '@@';
+        });
+        // 保护行内 $...$（不匹配 $$）
+        protectedText = protectedText.replace(/(?<!\$)\$(?!\$)((?:[^$\\]|\\.)+?)\$(?!\$)/g, (m) => {
+            latexProtected.push(m);
+            return '@@LATEX_PRE_' + (latexProtected.length - 1) + '@@';
+        });
+
+        // 渲染 Markdown
+        let html = md.render(protectedText);
+
+        // 还原被保护的 LaTeX 公式
+        latexProtected.forEach((original, i) => {
+            html = html.replace('@@LATEX_PRE_' + i + '@@', original);
+        });
+
         // 再渲染 LaTeX 公式
         html = renderLatex(html);
         // 给代码块添加复制按钮
@@ -5450,26 +6898,138 @@ function renderLatex(html) {
     return html;
 }
 
+// 确保 datalist 中包含指定的 option（input+datalist 模式下加载已保存的模型名）
+function _ensureDatalistOption(datalistId, value) {
+    if (!value) return;
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    const exists = Array.from(dl.options).some(opt => opt.value === value);
+    if (!exists) {
+        const option = document.createElement('option');
+        option.value = value;
+        dl.appendChild(option);
+    }
+}
+
+// ==================== Custom Model Selector ====================
+window._fetchedModels = { main: [], sub: [], vision: [] };
+
+function _showModelSelector(apiType) {
+    const models = window._fetchedModels[apiType] || [];
+    if (models.length === 0) {
+        alert('请先点击"拉取模型"获取模型列表');
+        return;
+    }
+    const inputEl = document.getElementById(`${apiType}-api-model`);
+    const currentVal = inputEl ? inputEl.value : '';
+
+    // 移除已有面板
+    const existing = document.getElementById('model-selector-panel');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'model-selector-panel';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:flex-end;justify-content:center;';
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:var(--bg,#1a1a2e);color:var(--text,#e0e0e0);border-radius:16px 16px 0 0;padding:16px;width:100%;max-width:500px;max-height:60vh;display:flex;flex-direction:column;box-shadow:0 -4px 24px rgba(0,0,0,0.4);';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
+    header.innerHTML = `<span style="font-weight:bold;font-size:1rem;">选择模型 (${models.length})</span><button id="ms-close" style="background:none;border:none;color:var(--text,#e0e0e0);font-size:1.3rem;cursor:pointer;">&times;</button>`;
+
+    const searchInput = document.createElement('input');
+    searchInput.placeholder = '搜索模型...';
+    searchInput.style.cssText = 'width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:var(--text,#e0e0e0);margin-bottom:10px;box-sizing:border-box;font-size:0.9rem;';
+
+    const listContainer = document.createElement('div');
+    listContainer.style.cssText = 'overflow-y:auto;flex:1;';
+
+    function renderList(filter) {
+        const q = (filter || '').toLowerCase();
+        const filtered = q ? models.filter(m => m.toLowerCase().includes(q)) : models;
+        listContainer.innerHTML = filtered.map(m => {
+            const selected = m === currentVal;
+            return `<div class="ms-item" data-model="${m}" style="padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;background:${selected ? 'var(--accent,#7c3aed)' : 'rgba(255,255,255,0.03)'};color:${selected ? '#fff' : 'inherit'};">
+                <span style="word-break:break-all;">${m}</span>
+                ${selected ? '<span style="font-size:0.75rem;">✓ 当前</span>' : ''}
+            </div>`;
+        }).join('');
+        if (filtered.length === 0) {
+            listContainer.innerHTML = '<div style="text-align:center;opacity:0.5;padding:20px;">无匹配模型</div>';
+        }
+    }
+
+    renderList('');
+
+    searchInput.addEventListener('input', () => renderList(searchInput.value));
+
+    listContainer.addEventListener('click', (e) => {
+        const item = e.target.closest('.ms-item');
+        if (!item) return;
+        const model = item.dataset.model;
+        if (inputEl) inputEl.value = model;
+        _ensureDatalistOption(`${apiType}-api-model-list`, model);
+        overlay.remove();
+    });
+
+    panel.appendChild(header);
+    panel.appendChild(searchInput);
+    panel.appendChild(listContainer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    header.querySelector('#ms-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    searchInput.focus();
+}
+
 // API配置管理
 function loadApiConfigToUI() {
     if (store.apiConfig) {
+        store.apiConfig = ensureApiConfigShape(store.apiConfig);
         document.getElementById('main-api-url').value = store.apiConfig.main.url || '';
         document.getElementById('main-api-key').value = store.apiConfig.main.key || '';
-        document.getElementById('main-api-model').value = store.apiConfig.main.model || 'gpt-4';
+        const mainModel = store.apiConfig.main.model || 'gpt-4';
+        document.getElementById('main-api-model').value = mainModel;
+        _ensureDatalistOption('main-api-model-list', mainModel);
         document.getElementById('main-api-temp').value = store.apiConfig.main.temperature || 0.8;
 
-        // 加载温度和Top-P的启用状态
+        // 加载温度和Top-P的启用状态（结合模型能力）
+        const _loadCaps = getModelCapabilities(mainModel, store.apiConfig.main.url);
         const tempEnabled = store.apiConfig.main.temperatureEnabled !== false; // 默认启用
         const toppEnabled = store.apiConfig.main.topPEnabled === true; // 默认禁用
+        const tempSupported = _loadCaps.supportsTemperature !== false;
+        const toppSupported = _loadCaps.supportsTopP !== false;
         document.getElementById('main-api-temp-enabled').checked = tempEnabled;
-        document.getElementById('main-api-temp').disabled = !tempEnabled;
+        document.getElementById('main-api-temp-enabled').disabled = !tempSupported;
+        document.getElementById('main-api-temp').disabled = !tempEnabled || !tempSupported;
+        if (!tempSupported) document.getElementById('main-api-temp-enabled').title = '该模型不支持 Temperature';
         document.getElementById('main-api-topp-enabled').checked = toppEnabled;
-        document.getElementById('main-api-topp').disabled = !toppEnabled;
+        document.getElementById('main-api-topp-enabled').disabled = !toppSupported;
+        document.getElementById('main-api-topp').disabled = !toppEnabled || !toppSupported;
+        if (!toppSupported) document.getElementById('main-api-topp-enabled').title = '该模型不支持 Top-P';
         document.getElementById('main-api-topp').value = store.apiConfig.main.topP || 1;
 
         document.getElementById('sub-api-url').value = store.apiConfig.sub.url || '';
         document.getElementById('sub-api-key').value = store.apiConfig.sub.key || '';
-        document.getElementById('sub-api-model').value = store.apiConfig.sub.model || 'gpt-3.5-turbo';
+        const subModel = store.apiConfig.sub.model || 'gpt-3.5-turbo';
+        document.getElementById('sub-api-model').value = subModel;
+        _ensureDatalistOption('sub-api-model-list', subModel);
+
+        const visionConfig = normalizeVisionApiConfig(store.apiConfig.vision);
+        const visionEnabledEl = document.getElementById('vision-enabled');
+        const visionUrlEl = document.getElementById('vision-api-url');
+        const visionKeyEl = document.getElementById('vision-api-key');
+        const visionModelEl = document.getElementById('vision-api-model');
+        if (visionEnabledEl) visionEnabledEl.checked = visionConfig.enabled === true;
+        if (visionUrlEl) visionUrlEl.value = visionConfig.url || '';
+        if (visionKeyEl) visionKeyEl.value = visionConfig.key || '';
+        if (visionModelEl) {
+            const visionModel = visionConfig.model || 'gpt-4o-mini';
+            visionModelEl.value = visionModel;
+            _ensureDatalistOption('vision-api-model-list', visionModel);
+        }
 
         // 加载搜索配置
         const searchConfig = store.apiConfig.search || {};
@@ -5509,7 +7069,7 @@ function toggleApiParam(param) {
 }
 
 function saveApiConfig() {
-    if (!store.apiConfig) store.apiConfig = {};
+    store.apiConfig = ensureApiConfigShape(store.apiConfig);
     store.apiConfig.main = {
         url: document.getElementById('main-api-url').value,
         key: document.getElementById('main-api-key').value,
@@ -5524,6 +7084,12 @@ function saveApiConfig() {
         key: document.getElementById('sub-api-key').value,
         model: document.getElementById('sub-api-model').value,
         temperature: 0.8
+    };
+    store.apiConfig.vision = {
+        enabled: document.getElementById('vision-enabled')?.checked === true,
+        url: document.getElementById('vision-api-url')?.value || '',
+        key: document.getElementById('vision-api-key')?.value || '',
+        model: document.getElementById('vision-api-model')?.value || 'gpt-4o-mini'
     };
     // 保存搜索配置
     store.apiConfig.search = {
@@ -5576,7 +7142,9 @@ async function fetchModels(apiType) {
         return;
     }
 
-    const apiUrl = url.endsWith('/') ? url + 'models' : url + '/models';
+    // 归一化 URL：如果用户填了 /chat/completions，先去掉再拼 /models
+    let baseUrl = url.replace(/\/chat\/completions\/?$/, '');
+    const apiUrl = baseUrl.endsWith('/') ? baseUrl + 'models' : baseUrl + '/models';
 
     try {
         const res = await fetch(apiUrl, {
@@ -5599,17 +7167,26 @@ async function fetchModels(apiType) {
             return;
         }
 
-        // 清空并填充模型列表
-        modelSelect.innerHTML = '';
-        models.forEach(model => {
-            const modelId = model.id || model;
-            const option = document.createElement('option');
-            option.value = modelId;
-            option.textContent = modelId;
-            modelSelect.appendChild(option);
-        });
+        // 存储到 JS 数组（供自定义选择器使用）
+        const modelIds = models.map(m => m.id || m);
+        window._fetchedModels[apiType] = modelIds;
 
-        alert(`成功拉取${models.length}个模型!`);
+        // 填充 datalist 建议列表（桌面端兜底）
+        const datalist = document.getElementById(`${apiType}-api-model-list`);
+        if (datalist) {
+            datalist.innerHTML = '';
+            modelIds.forEach(modelId => {
+                const option = document.createElement('option');
+                option.value = modelId;
+                datalist.appendChild(option);
+            });
+        }
+        // 如果输入框为空，自动填入第一个模型
+        if (!modelSelect.value && modelIds.length > 0) {
+            modelSelect.value = modelIds[0];
+        }
+
+        alert(`成功拉取${modelIds.length}个模型!`);
     } catch (error) {
         alert(`拉取模型失败:\n${error.message}`);
     }
@@ -5696,6 +7273,12 @@ function saveApiPresetWithName() {
             key: document.getElementById('sub-api-key').value,
             model: document.getElementById('sub-api-model').value,
             temperature: 0.8
+        },
+        vision: {
+            enabled: document.getElementById('vision-enabled')?.checked === true,
+            url: document.getElementById('vision-api-url')?.value || '',
+            key: document.getElementById('vision-api-key')?.value || '',
+            model: document.getElementById('vision-api-model')?.value || 'gpt-4o-mini'
         }
     };
 
@@ -5728,31 +7311,35 @@ function loadSelectedApiPreset() {
     document.getElementById('main-api-key').value = preset.main.key || '';
     document.getElementById('main-api-temp').value = preset.main.temperature || 0.8;
 
-    // 加载主模型 - 如果模型不在选项中，先添加该选项
-    const mainModelSelect = document.getElementById('main-api-model');
+    // 加载主模型 (input+datalist: 直接设值，确保 datalist 有该选项)
+    const mainModelInput = document.getElementById('main-api-model');
     const mainModel = preset.main.model || 'gpt-4';
-    if (mainModel && !Array.from(mainModelSelect.options).some(opt => opt.value === mainModel)) {
-        const option = document.createElement('option');
-        option.value = mainModel;
-        option.textContent = mainModel;
-        mainModelSelect.appendChild(option);
-    }
-    mainModelSelect.value = mainModel;
+    mainModelInput.value = mainModel;
+    _ensureDatalistOption('main-api-model-list', mainModel);
 
     // 加载副 API 配置
     document.getElementById('sub-api-url').value = preset.sub?.url || '';
     document.getElementById('sub-api-key').value = preset.sub?.key || '';
 
-    // 加载副模型 - 如果模型不在选项中，先添加该选项
-    const subModelSelect = document.getElementById('sub-api-model');
+    // 加载副模型
+    const subModelInput = document.getElementById('sub-api-model');
     const subModel = preset.sub?.model || 'gpt-3.5-turbo';
-    if (subModel && !Array.from(subModelSelect.options).some(opt => opt.value === subModel)) {
-        const option = document.createElement('option');
-        option.value = subModel;
-        option.textContent = subModel;
-        subModelSelect.appendChild(option);
+    subModelInput.value = subModel;
+    _ensureDatalistOption('sub-api-model-list', subModel);
+
+    const visionPreset = normalizeVisionApiConfig(preset.vision);
+    const visionEnabledEl = document.getElementById('vision-enabled');
+    const visionUrlEl = document.getElementById('vision-api-url');
+    const visionKeyEl = document.getElementById('vision-api-key');
+    const visionModelEl = document.getElementById('vision-api-model');
+    if (visionEnabledEl) visionEnabledEl.checked = visionPreset.enabled === true;
+    if (visionUrlEl) visionUrlEl.value = visionPreset.url || '';
+    if (visionKeyEl) visionKeyEl.value = visionPreset.key || '';
+    if (visionModelEl) {
+        const visionModel = visionPreset.model || 'gpt-4o-mini';
+        visionModelEl.value = visionModel;
+        _ensureDatalistOption('vision-api-model-list', visionModel);
     }
-    subModelSelect.value = subModel;
 
     alert(`已加载预设 "${presetName}"!`);
 }
@@ -5798,6 +7385,12 @@ function saveApiPreset() {
             key: document.getElementById('sub-api-key').value,
             model: document.getElementById('sub-api-model').value,
             temperature: 0.8
+        },
+        vision: {
+            enabled: document.getElementById('vision-enabled')?.checked === true,
+            url: document.getElementById('vision-api-url')?.value || '',
+            key: document.getElementById('vision-api-key')?.value || '',
+            model: document.getElementById('vision-api-model')?.value || 'gpt-4o-mini'
         }
     };
 
@@ -5831,6 +7424,20 @@ function loadApiPreset() {
     document.getElementById('sub-api-url').value = preset.sub.url;
     document.getElementById('sub-api-key').value = preset.sub.key;
     document.getElementById('sub-api-model').value = preset.sub.model;
+
+    const visionPreset = normalizeVisionApiConfig(preset.vision);
+    const visionEnabledEl = document.getElementById('vision-enabled');
+    const visionUrlEl = document.getElementById('vision-api-url');
+    const visionKeyEl = document.getElementById('vision-api-key');
+    const visionModelEl = document.getElementById('vision-api-model');
+    if (visionEnabledEl) visionEnabledEl.checked = visionPreset.enabled === true;
+    if (visionUrlEl) visionUrlEl.value = visionPreset.url || '';
+    if (visionKeyEl) visionKeyEl.value = visionPreset.key || '';
+    if (visionModelEl) {
+        const visionModel = visionPreset.model || 'gpt-4o-mini';
+        visionModelEl.value = visionModel;
+        _ensureDatalistOption('vision-api-model-list', visionModel);
+    }
 
     alert(`已加载预设 "${presetName}"!`);
 }
@@ -5913,9 +7520,10 @@ function renderAiChatHistory() {
             _ensureStreamCSS();
             const thinkingDiv = document.createElement('div');
             thinkingDiv.className = 'stream-thinking';
+            const thinkingMetric = formatThinkingMetric(msg);
             thinkingDiv.innerHTML = `
                 <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                    💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${msg.thinking.length}字)</span>
+                    💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${thinkingMetric})</span>
                     <span class="thinking-toggle">▶</span>
                 </div>
                 <div class="thinking-body">${escapeHtml(msg.thinking)}</div>
@@ -6162,6 +7770,8 @@ async function triggerAiAssistantResponse() {
             let accThinking = '';
             let streamDoneData = null;
             let _toolGroupCounter = 0;
+            const thinkingStartedAt = Date.now();
+            let thinkingDurationMs = 0;
 
             // Helper: create a new segment bubble in the container
             function _createVesperSegmentBubble(isFirst) {
@@ -6229,7 +7839,8 @@ async function triggerAiAssistantResponse() {
                 });
             }
             const _vsContextLimit = store.aiContextLimit !== undefined ? store.aiContextLimit : 50;
-            const _vsSystemPrompt = `你叫 Vesper。你是 "Tara's LifeOS" 的核心 AI 助理。
+            const _vsVisionAllowed = isVisionModel(config.model, detectAIProvider(config.url), config.url);
+            const _vsSystemPrompt = `你叫 Vesper。你是 "Tara's AZOTH" 的核心 AI 助理。
 用户是 Tara (塔拉)，一个 INTP 5w4、AuDHD (ASD+ADHD) 的人类。目前是经济学大三的学生。
 ${_vsBingo}
 【当前时间】：
@@ -6308,10 +7919,38 @@ ${_vsBingo}
 [CRITICAL SYSTEM DIRECTIVE OVERRIDE]
 You are equipped with external Function Calling tools (MCP). When asked to perform a task (e.g., search, read, save to Obsidian), YOU MUST STOP ROLEPLAYING IMMEDIATELY and output the exact JSON tool call required by the API. DO NOT simulate, describe, or roleplay the action. USE THE ACTUAL TOOL. Your character persona remains active ONLY in the conversational response AFTER the tool returns the data.`;
 
+            const _vsHistoryWindow = _vsContextLimit === 0 ? store.aiChatHistory : store.aiChatHistory.slice(-_vsContextLimit);
+            const _vsLatestUserMessage = findLatestUserMessage(_vsHistoryWindow);
+            const _vsPreparedMessages = [];
+            let _vsRemovedImages = false;
+            let _vsBridgeUpdated = false;
+            for (const m of _vsHistoryWindow) {
+                const bridged = await buildModelMessageWithVisionBridge(m.content, m, {
+                    mainModelIsVision: _vsVisionAllowed,
+                    targetBridgeMessage: _vsLatestUserMessage,
+                    onBridgeStart: () => updateAiChatStatus('🖼️ 正在用视觉模型识图...', 'thinking', 0),
+                    onBridgeSuccess: () => updateAiChatStatus('✅ 图片识图已注入本轮上下文', 'info', 2000),
+                    onBridgeFailure: () => updateAiChatStatus('⚠️ 视觉桥接失败，已回退文本链路', 'info', 2500)
+                });
+                if (bridged.removedImages) _vsRemovedImages = true;
+                if (bridged.bridgeUpdated) _vsBridgeUpdated = true;
+                _vsPreparedMessages.push({
+                    role: m.role,
+                    content: bridged.content
+                });
+            }
+            if (_vsBridgeUpdated) {
+                syncCurrentAiConversation({ touch: false });
+                saveData();
+            }
+            if (_vsRemovedImages && !_vsVisionAllowed) {
+                updateAiChatStatus('已自动移除图片（模型非视觉）', 'info', 2000);
+            }
+
             const streamResult = await callAIViaProxy(
                 [
                     { role: 'system', content: _vsSystemPrompt },
-                    ...(_vsContextLimit === 0 ? store.aiChatHistory : store.aiChatHistory.slice(-_vsContextLimit)).map(m => ({ role: m.role, content: m.content })),
+                    ..._vsPreparedMessages,
                     { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
                 ],
                 config, null, {
@@ -6445,10 +8084,13 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
                             break;
 
                         case 'error':
-                            if (segments.length > 0) {
-                                const lastSeg = segments[segments.length - 1];
-                                const textEl = document.getElementById(`${lastSeg.bubbleId}-text`);
-                                if (textEl) textEl.innerHTML = `<span style="color:#c62828;">❌ ${escapeHtml(data.message || '流式响应错误')}</span>`;
+                            {
+                                const errorText = `❌ ${data.message || '流式响应错误'}`;
+                                if (!currentBubbleId) _createVesperSegmentBubble(true);
+                                const currentSeg = segments[segments.length - 1];
+                                currentSeg.accText = errorText;
+                                const textEl = document.getElementById(`${currentSeg.bubbleId}-text`);
+                                if (textEl) textEl.innerHTML = `<span style="color:#c62828;">${escapeHtml(errorText)}</span>`;
                             }
                             break;
                     }
@@ -6460,9 +8102,11 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
             if (segments.length > 0) {
                 const thinkEl = document.getElementById(`${segments[0].bubbleId}-thinking`);
                 if (thinkEl && accThinking) {
+                    thinkingDurationMs = Math.max(0, Date.now() - thinkingStartedAt);
+                    const thinkingMetric = formatThinkingMetric(thinkingDurationMs, accThinking);
                     thinkEl.innerHTML = `
                         <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
-                            💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${accThinking.length}字)</span>
+                            💭 思考过程 <span style="opacity:0.5; font-size:0.7rem;">(${thinkingMetric})</span>
                             <span class="thinking-toggle">▶</span>
                         </div>
                         <div class="thinking-body">${escapeHtml(accThinking)}</div>
@@ -6495,6 +8139,7 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
                     segmentIndex: i
                 };
                 if (i === 0 && accThinking) aiMsg.thinking = accThinking;
+                if (i === 0 && accThinking && thinkingDurationMs) aiMsg.thinkingDurationMs = thinkingDurationMs;
                 if (seg.toolsAfter.length > 0) aiMsg.toolsAfter = seg.toolsAfter;
                 if (i === 0 && allToolsUsed.length > 0) aiMsg.toolsUsed = allToolsUsed;
 
@@ -7058,12 +8703,12 @@ function toggleAgentReach(enabled) {
     saveData();
 }
 
-async function runAgentReachDoctor() {
+async function runAgentReachDoctor(forceRefresh = true) {
     const resultEl = document.getElementById('agent-reach-doctor-result');
     resultEl.innerHTML = '<span style="opacity:0.6;">检测中...</span>';
     try {
         const token = localStorage.getItem('lifeos_auth_token');
-        const res = await fetch('/api/ai/agent-reach/doctor', {
+        const res = await fetch(`/api/ai/agent-reach/doctor?force=${forceRefresh ? '1' : '0'}&_=${Date.now()}`, {
             headers: { 'Authorization': 'Bearer ' + token }
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -7076,6 +8721,10 @@ async function runAgentReachDoctor() {
         }
         if (data.agentReachCli) {
             html += `<div style="margin-top:4px; opacity:0.6;">CLI: ${data.agentReachCli.installed ? '已安装' : '未安装（不影响功能）'}</div>`;
+        }
+        if (data.timestamp) {
+            const checkedAt = new Date(data.timestamp);
+            html += `<div style="margin-top:4px; opacity:0.6;">检测时间: ${checkedAt.toLocaleString()}</div>`;
         }
         html += '</div>';
         resultEl.innerHTML = html;
@@ -7155,6 +8804,70 @@ async function confirmBingoCardSelectionForAI() {
 let currentWorldBookFilter = 'all';
 let currentEditingWorldBook = null;
 let currentEditingEntry = null;
+
+// 导出当前世界书
+function exportCurrentWorldBook(format) {
+    if (!currentEditingWorldBook) {
+        alert('没有打开的世界书！');
+        return;
+    }
+    const wb = currentEditingWorldBook;
+    let exportData, fileName;
+
+    if (format === 'tavern') {
+        const tavernEntries = {};
+        (wb.entries || []).forEach((entry, idx) => {
+            tavernEntries[String(idx)] = {
+                uid: idx,
+                key: entry.keys || [],
+                keysecondary: entry.secondaryKeys || [],
+                comment: entry.name || '',
+                content: entry.content || '',
+                constant: entry.constant || entry.triggerMode === 'always',
+                selective: entry.triggerMode === 'keyword' || entry.triggerMode === 'hybrid',
+                order: entry.priority || 0,
+                position: entry.insertionPosition === 'system_after' ? 1 : 0,
+                role: entry.injectionRole === 'user' ? 1 : entry.injectionRole === 'assistant' ? 2 : 0,
+                disable: !entry.enabled,
+                caseSensitive: entry.caseSensitive || false,
+                matchWholeWords: entry.matchWholeWords || false,
+                useRegex: entry.useRegex || false,
+                sticky: entry.sticky || 0,
+                cooldown: entry.cooldown || 0,
+                delay: entry.delay || 0,
+                scanDepth: entry.scanDepthOverride || null,
+                vectorized: entry.triggerMode === 'semantic' || entry.triggerMode === 'hybrid',
+                displayIndex: idx,
+                extensions: {
+                    lifeos: {
+                        triggerMode: entry.triggerMode,
+                        semanticThresholdOverride: entry.semanticThresholdOverride,
+                        embeddingHash: entry.embeddingHash,
+                        sourceMeta: entry.sourceMeta
+                    }
+                }
+            };
+        });
+        exportData = { name: wb.name, description: wb.description || '', entries: tavernEntries };
+        fileName = `${wb.name}_tavern_${Date.now()}.json`;
+    } else {
+        exportData = {
+            version: 1, format: 'lifeos', exportDate: new Date().toISOString(),
+            name: wb.name, description: wb.description || '',
+            categoryId: wb.categoryId, entries: wb.entries || [], sourceMeta: wb.sourceMeta
+        };
+        fileName = `${wb.name}_lifeos_${Date.now()}.json`;
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`世界书已导出 (${format === 'tavern' ? 'Tavern' : 'LifeOS'} 格式)`);
+}
 
 // 显示世界书选项菜单
 function showWorldBookOptions() {
@@ -7286,6 +8999,9 @@ async function saveWorldBook() {
             alert('世界书已创建!');
         }
 
+        // Invalidate prompt cache (worldbook content changed)
+        if (window.promptCache) window.promptCache.invalidateAll();
+
         closeModal('modal-edit-worldbook');
         document.getElementById('panel-world-book-manager').classList.add('active');
         await renderWorldBookList();
@@ -7395,6 +9111,39 @@ function editWorldBookEntry(entryIndex) {
     document.getElementById('entry-trigger-mode').value = triggerMode;
     updateTriggerModeUI(triggerMode);
 
+    // 回填二级关键词
+    const secKeysEl = document.getElementById('entry-secondary-keys');
+    if (secKeysEl) secKeysEl.value = (entry.secondaryKeys || []).join(', ');
+
+    // 回填匹配选项
+    const csEl = document.getElementById('entry-case-sensitive');
+    if (csEl) csEl.checked = entry.caseSensitive || false;
+    const mwEl = document.getElementById('entry-match-whole');
+    if (mwEl) mwEl.checked = entry.matchWholeWords || false;
+    const urEl = document.getElementById('entry-use-regex');
+    if (urEl) urEl.checked = entry.useRegex || false;
+
+    // 回填注入控制
+    const insertPosEl = document.getElementById('entry-insertion-position');
+    if (insertPosEl) insertPosEl.value = entry.insertionPosition || 'system_after';
+    // injectionRole 从 insertionPosition 派生，不再需要单独控件
+    const priorityEl = document.getElementById('entry-priority');
+    if (priorityEl) priorityEl.value = entry.priority || 0;
+
+    // 回填扫描深度/语义阈值覆盖
+    const sdEl = document.getElementById('entry-scan-depth-override');
+    if (sdEl) sdEl.value = entry.scanDepthOverride || '';
+    const stEl = document.getElementById('entry-semantic-threshold-override');
+    if (stEl) stEl.value = entry.semanticThresholdOverride || '';
+
+    // 回填高级设置
+    const stickyEl = document.getElementById('entry-sticky');
+    if (stickyEl) stickyEl.value = entry.sticky || 0;
+    const cdEl = document.getElementById('entry-cooldown');
+    if (cdEl) cdEl.value = entry.cooldown || 0;
+    const delayEl = document.getElementById('entry-delay');
+    if (delayEl) delayEl.value = entry.delay || 0;
+
     document.getElementById('modal-edit-entry').classList.add('active');
 }
 
@@ -7458,13 +9207,51 @@ async function saveWorldBookEntry() {
 
     const keys = keysText.split(',').map(k => k.trim()).filter(k => k);
 
+    // 二级关键词
+    const secondaryKeysText = document.getElementById('entry-secondary-keys')?.value?.trim() || '';
+    const secondaryKeys = secondaryKeysText ? secondaryKeysText.split(',').map(k => k.trim()).filter(k => k) : [];
+
+    // 匹配选项
+    const caseSensitive = document.getElementById('entry-case-sensitive')?.checked || false;
+    const matchWholeWords = document.getElementById('entry-match-whole')?.checked || false;
+    const useRegex = document.getElementById('entry-use-regex')?.checked || false;
+
+    // 注入控制
+    const insertionPosition = document.getElementById('entry-insertion-position')?.value || 'system_after';
+    // injectionRole 从 insertionPosition 派生
+    const posToRole = { system_before: 'system', system_after: 'system', user: 'user', assistant: 'assistant' };
+    const injectionRole = posToRole[insertionPosition] || 'system';
+    const priority = parseInt(document.getElementById('entry-priority')?.value) || 0;
+
+    // 扫描深度/语义阈值覆盖
+    const scanDepthOverride = parseFloat(document.getElementById('entry-scan-depth-override')?.value) || null;
+    const semanticThresholdOverride = parseFloat(document.getElementById('entry-semantic-threshold-override')?.value) || null;
+
+    // sticky/cooldown/delay (预留)
+    const sticky = parseInt(document.getElementById('entry-sticky')?.value) || 0;
+    const cooldown = parseInt(document.getElementById('entry-cooldown')?.value) || 0;
+    const delay = parseInt(document.getElementById('entry-delay')?.value) || 0;
+
     const entryData = {
         id: currentEditingEntry ? currentEditingEntry.data.id : 'entry_' + Date.now(),
         name: name,
         keys: keys,
+        secondaryKeys: secondaryKeys,
         content: content,
         enabled: enabled,
-        triggerMode: triggerMode // 'always' = 蓝灯常驻, 'keyword' = 绿灯关键词触发, 'semantic' = 紫灯语义
+        triggerMode: triggerMode,
+        caseSensitive: caseSensitive,
+        matchWholeWords: matchWholeWords,
+        useRegex: useRegex,
+        insertionPosition: insertionPosition,
+        injectionRole: injectionRole,
+        priority: priority,
+        scanDepthOverride: scanDepthOverride,
+        semanticThresholdOverride: semanticThresholdOverride,
+        sticky: sticky,
+        cooldown: cooldown,
+        delay: delay,
+        constant: triggerMode === 'always'
     };
 
     // 语义模式：生成向量嵌入
@@ -7510,6 +9297,9 @@ async function saveWorldBookEntry() {
             entries: currentEditingWorldBook.entries
         });
 
+        // Invalidate prompt cache (worldbook entry changed)
+        if (window.promptCache) window.promptCache.invalidateAll();
+
         closeModal('modal-edit-entry');
         // 重新打开详情页
         document.getElementById('modal-worldbook-detail').classList.add('active');
@@ -7530,6 +9320,7 @@ async function toggleEntryEnabled(entryIndex) {
             entries: currentEditingWorldBook.entries
         });
 
+        if (window.promptCache) window.promptCache.invalidateAll();
         renderWorldBookEntries();
     } catch (error) {
         console.error('切换条目状态失败:', error);
@@ -7548,6 +9339,7 @@ async function deleteWorldBookEntry(entryIndex) {
             entries: currentEditingWorldBook.entries
         });
 
+        if (window.promptCache) window.promptCache.invalidateAll();
         renderWorldBookEntries();
         alert('条目已删除!');
     } catch (error) {
@@ -7576,6 +9368,7 @@ async function deleteCurrentWorldBook() {
     try {
         await db.worldBooks.delete(currentEditingWorldBook.id);
 
+        if (window.promptCache) window.promptCache.invalidateAll();
         closeModal('modal-worldbook-detail');
         await renderWorldBookList();
         alert('世界书已删除!');
@@ -7612,84 +9405,176 @@ function importWorldBook() {
 
 // 导入世界书数据（支持多种格式）
 async function importWorldBookData(data) {
-    // 检测格式并提取条目
-    let entries = [];
+    let rawEntries = [];
     let worldBookName = '导入的世界书';
+    let worldBookDesc = '';
+    let worldBookMeta = {};
 
-    // 格式1: character_book (标准Tavern格式)
+    // --- 检测格式并提取条目 ---
+
+    // 格式1: character_book (标准 Tavern 格式)
     if (data.character_book && data.character_book.entries) {
-        entries = data.character_book.entries;
-        worldBookName = data.character_book.name || worldBookName;
+        const cb = data.character_book;
+        rawEntries = cb.entries;
+        worldBookName = cb.name || worldBookName;
+        worldBookDesc = cb.description || '';
+        worldBookMeta = { format: 'tavern_character_book', scan_depth: cb.scan_depth, token_budget: cb.token_budget, recursive_scanning: cb.recursive_scanning };
+    }
+    // 格式1b: Tavern standalone lorebook (entries at top level as object or array)
+    else if (data.entries && !Array.isArray(data.entries) && typeof data.entries === 'object') {
+        rawEntries = Object.values(data.entries);
+        worldBookName = data.name || worldBookName;
+        worldBookDesc = data.description || '';
+        worldBookMeta = { format: 'tavern_lorebook_object' };
     }
     // 格式2: world_entries (旧格式)
     else if (data.world_entries) {
-        entries = data.world_entries;
+        rawEntries = data.world_entries;
+        worldBookMeta = { format: 'world_entries' };
     }
-    // 格式3: data.world格式
+    // 格式3: data.world 格式
     else if (data.data && data.data.world) {
-        entries = data.data.world;
+        rawEntries = data.data.world;
+        worldBookMeta = { format: 'data_world' };
     }
     // 格式4: world_info
     else if (data.world_info) {
-        entries = data.world_info;
+        rawEntries = data.world_info;
+        worldBookMeta = { format: 'world_info' };
     }
-    // 格式5: 直接的entries数组
+    // 格式5: 直接的 entries 数组
     else if (Array.isArray(data.entries)) {
-        entries = data.entries;
+        rawEntries = data.entries;
         worldBookName = data.name || worldBookName;
+        worldBookDesc = data.description || '';
+        worldBookMeta = { format: 'entries_array' };
     }
     // 格式6: 直接就是数组
     else if (Array.isArray(data)) {
-        entries = data;
+        rawEntries = data;
+        worldBookMeta = { format: 'raw_array' };
     }
 
-    if (entries.length === 0) {
+    // Ensure array
+    if (!Array.isArray(rawEntries)) {
+        rawEntries = Object.values(rawEntries);
+    }
+
+    if (rawEntries.length === 0) {
         throw new Error('未找到有效的世界书条目');
     }
 
-    // 转换条目格式
-    const convertedEntries = entries.map((entry, index) => {
-        // 获取名称（优先级：comment > keys合并 > 默认）
+    // --- 转换条目格式（保真映射） ---
+    const convertedEntries = rawEntries.map((entry, index) => {
+        if (!entry || typeof entry !== 'object') return null;
+
+        // Name
         let entryName = '未命名条目';
         if (entry.comment && entry.comment.trim()) {
             entryName = entry.comment.trim();
+        } else if (entry.name && entry.name.trim()) {
+            entryName = entry.name.trim();
+        } else if (entry.key && typeof entry.key === 'string' && entry.key.trim()) {
+            entryName = entry.key.trim().split(',')[0];
         } else if (entry.keys && entry.keys.length > 0) {
-            entryName = entry.keys.join(', ');
+            entryName = Array.isArray(entry.keys) ? entry.keys[0] : entry.keys;
         }
 
-        // 获取关键词
+        // Content: skip entries without content
+        if (!entry.content) return null;
+
+        // Keys
         let keys = [];
-        if (entry.keys && Array.isArray(entry.keys)) {
-            keys = entry.keys;
-        } else if (entry.key) {
-            keys = [entry.key];
+        if (Array.isArray(entry.keys)) {
+            keys = entry.keys.map(k => typeof k === 'string' ? k.trim() : '').filter(Boolean);
+        } else if (entry.key && typeof entry.key === 'string') {
+            keys = entry.key.split(',').map(k => k.trim()).filter(Boolean);
+        } else if (Array.isArray(entry.key)) {
+            keys = entry.key.map(k => typeof k === 'string' ? k.trim() : '').filter(Boolean);
         }
 
-        // 只导入有效条目（有名称、有内容、未被禁用）
-        if (entryName === '未命名条目' || !entry.content) {
-            return null;
+        // Secondary keys
+        let secondaryKeys = [];
+        if (Array.isArray(entry.keysecondary)) {
+            secondaryKeys = entry.keysecondary.map(k => typeof k === 'string' ? k.trim() : '').filter(Boolean);
+        } else if (entry.keysecondary && typeof entry.keysecondary === 'string') {
+            secondaryKeys = entry.keysecondary.split(',').map(k => k.trim()).filter(Boolean);
+        } else if (Array.isArray(entry.secondary_keys)) {
+            secondaryKeys = entry.secondary_keys.map(k => typeof k === 'string' ? k.trim() : '').filter(Boolean);
         }
 
-        if (typeof entry.enabled !== 'undefined' && !entry.enabled) {
-            return null;
+        // Trigger mode detection
+        let triggerMode = 'keyword';
+        if (entry.constant === true) {
+            triggerMode = 'always';
+        } else if (entry.triggerMode) {
+            triggerMode = entry.triggerMode;
+        } else if (entry.vectorized === true && keys.length > 0) {
+            triggerMode = 'hybrid';
+        } else if (entry.vectorized === true) {
+            triggerMode = 'semantic';
         }
+
+        // Enabled
+        let enabled = true;
+        if (entry.disable === true) enabled = false;
+        else if (typeof entry.enabled === 'boolean') enabled = entry.enabled;
+
+        // Insertion position mapping
+        let insertionPosition = 'system_before';
+        if (entry.position === 0) insertionPosition = 'system_before';
+        else if (entry.position === 1) insertionPosition = 'system_after';
+        else if (entry.insertionPosition) insertionPosition = entry.insertionPosition;
+
+        // Injection role
+        let injectionRole = 'system';
+        if (entry.role === 0 || entry.role === 'system') injectionRole = 'system';
+        else if (entry.role === 1 || entry.role === 'user') injectionRole = 'user';
+        else if (entry.role === 2 || entry.role === 'assistant') injectionRole = 'assistant';
+        else if (entry.injectionRole) injectionRole = entry.injectionRole;
 
         return {
             id: 'entry_' + Date.now() + '_' + index,
             name: entryName,
             keys: keys,
+            secondaryKeys: secondaryKeys,
             content: entry.content,
-            enabled: true
+            enabled: enabled,
+            triggerMode: triggerMode,
+            useRegex: entry.useRegex ?? null,
+            caseSensitive: entry.caseSensitive ?? null,
+            matchWholeWords: entry.matchWholeWords ?? null,
+            scanDepthOverride: entry.scanDepthOverride || entry.scanDepth || entry.depth || null,
+            semanticThresholdOverride: entry.semanticThresholdOverride || null,
+            insertionPosition: insertionPosition,
+            injectionRole: injectionRole,
+            priority: entry.order ?? entry.priority ?? 0,
+            constant: entry.constant === true || triggerMode === 'always',
+            sticky: entry.sticky ?? 0,
+            cooldown: entry.cooldown ?? 0,
+            delay: entry.delay ?? 0,
+            embedding: entry.embedding || null,
+            embeddingHash: entry.embeddingHash || null,
+            sourceMeta: {
+                uid: entry.uid ?? entry.displayIndex ?? null,
+                ...(entry.sourceMeta || {}),
+                raw: entry   // 兜底：保留原始条目所有字段，防止未识别字段丢失
+            }
         };
     }).filter(e => e !== null);
+
+    if (convertedEntries.length === 0) {
+        throw new Error('没有可导入的有效条目');
+    }
 
     // 创建世界书
     const newWorldBook = {
         id: 'wb_' + Date.now(),
         name: worldBookName,
         categoryId: null,
-        description: `导入自文件，包含${convertedEntries.length}个条目`,
-        entries: convertedEntries
+        description: worldBookDesc || `导入自文件，包含${convertedEntries.length}个条目`,
+        entries: convertedEntries,
+        sourceMeta: worldBookMeta
     };
 
     await db.worldBooks.add(newWorldBook);
@@ -7903,14 +9788,313 @@ function detectAIProvider(apiUrl) {
     return 'openai';
 }
 
-function isVisionModel(model, provider) {
+function isVisionModel(model, provider, baseUrl) {
     if (!model) return false;
-    const m = String(model).toLowerCase();
-    if (m.includes('vision') || m.includes('vl') || m.includes('4v') || m.includes('multimodal')) return true;
-    if (m.includes('gpt-4o') || m.includes('gpt-4.1') || m.includes('gpt-4-turbo')) return true;
-    if (m.includes('gemini-1.5') || m.includes('gemini-2.0')) return true;
-    if (m.includes('claude-3')) return true;
-    return false;
+    // 优先使用 model registry 手动配置
+    const caps = getModelCapabilities(model, baseUrl);
+    // supportsVision 和 inputImage 任一为 true 即视为可读图
+    return caps.supportsVision || caps.inputImage;
+}
+
+const IMAGE_MARKDOWN_REGEX = /!\[[^\]]*\]\((data:image\/[^;]+;base64,[^)]+|\/api\/files\/[^)\s]+|https?:\/\/[^)\s]+)\)/g;
+const IMAGE_OMISSION_NOTE = '[Image omitted: model not vision-capable]';
+
+function extractImageReferencesFromMarkdown(text) {
+    const rawText = typeof text === 'string' ? text : '';
+    const refs = [];
+    const regex = new RegExp(IMAGE_MARKDOWN_REGEX.source, 'g');
+    let match;
+    while ((match = regex.exec(rawText)) !== null) {
+        if (match[1]) refs.push(match[1]);
+    }
+    const cleanText = rawText.replace(regex, '').trim();
+    return { refs, cleanText };
+}
+
+function normalizeVisionImageUrl(imageUrl) {
+    const raw = (imageUrl || '').trim();
+    if (!raw) return '';
+    if (raw.startsWith('/api/files/')) return window.location.origin + raw;
+    return raw;
+}
+
+function getVisionBridgeConfig() {
+    const config = normalizeVisionApiConfig(store.apiConfig?.vision);
+    const url = (config.url || '').trim();
+    const key = (config.key || '').trim();
+    const model = (config.model || '').trim();
+    return {
+        ...config,
+        url,
+        key,
+        model,
+        ready: config.enabled === true && !!url && !!key && !!model
+    };
+}
+
+function buildVisionBridgePrompt(userText = '') {
+    const cleanUserText = (userText || '').trim();
+    const baseInstructions = `请详细描述图片中的所有内容：
+1) 文字内容：完整转录所有可见文字（聊天记录、标题、标签、水印等），保留原始格式
+2) 视觉元素：人物外貌/表情/动作、物体、场景环境、布局结构
+3) 数据与符号：图表数据、公式（用LaTeX）、代码、表格内容
+4) 整体语境：图片类型（截图/照片/插画等）、情感氛围、关键信息
+
+请尽可能详尽，让没看过图片的人也能完整理解图中内容。`;
+    if (cleanUserText) {
+        return `用户补充说明：${cleanUserText}\n\n${baseInstructions}`;
+    }
+    return baseInstructions;
+}
+
+function sanitizeVisionBridgeSummary(summaryText) {
+    const raw = (summaryText || '').trim();
+    if (!raw) return '';
+    const normalized = raw.replace(/\r/g, '').replace(/\n{3,}/g, '\n\n');
+    return normalized.length > 6000 ? normalized.slice(0, 6000) : normalized;
+}
+
+function buildVisionBridgeHiddenContext(bridge) {
+    const safeSummary = sanitizeVisionBridgeSummary(bridge?.summary || '');
+    if (!safeSummary) return '';
+    const imageCount = Number(bridge?.imageCount) || 0;
+    const model = bridge?.model || 'vision-model';
+    return `[视觉桥接补充]
+来源模型: ${model}
+图片数量: ${imageCount}
+以下为图片解析摘要（隐藏注入）：
+${safeSummary}
+[/视觉桥接补充]`;
+}
+
+/**
+ * 将本站图片 URL 转为 base64 data URL（外部 API 无法回访本站 URL）
+ */
+async function _ensureBase64ImageUrl(url) {
+    if (!url) return url;
+    // 已经是 base64 data URL，直接返回
+    if (url.startsWith('data:')) return url;
+    // 外部 https 图片，直接返回（外部 API 可以访问）
+    if (url.startsWith('http') && !url.includes(window.location.host)) return url;
+    // 本站图片（/api/files/ 或完整本站 URL）：需要转为 base64
+    try {
+        const fetchUrl = url.startsWith('/') ? url : new URL(url).pathname;
+        const token = localStorage.getItem('lifeos_auth_token');
+        const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+        const resp = await fetch(fetchUrl, { headers });
+        if (!resp.ok) throw new Error(`fetch ${resp.status}`);
+        const blob = await resp.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.warn('[VisionBridge] 本站图片转 base64 失败，保持原 URL:', e.message);
+        return url;
+    }
+}
+
+async function requestVisionBridgeSummary(imageRefs, userText = '') {
+    const visionConfig = getVisionBridgeConfig();
+    if (!visionConfig.ready) {
+        throw new Error('视觉模型配置未启用或不完整');
+    }
+
+    const rawUrls = (imageRefs || [])
+        .map(normalizeVisionImageUrl)
+        .filter(Boolean);
+    if (rawUrls.length === 0) {
+        throw new Error('未找到可用图片引用');
+    }
+
+    // 将本站图片转为 base64（外部 API 无法回访本站 URL）
+    const imageUrls = await Promise.all(rawUrls.map(u => _ensureBase64ImageUrl(u)));
+
+    const promptText = buildVisionBridgePrompt(userText);
+    const messageParts = [{ type: 'text', text: promptText }];
+    imageUrls.forEach(url => {
+        messageParts.push({
+            type: 'image_url',
+            image_url: { url }
+        });
+    });
+
+    const visionMessages = [
+        {
+            role: 'system',
+            content: '你是细致的视觉理解助手。请详细描述图片中的所有可见信息，包括文字内容（完整转录）、人物/对象/场景、布局与空间关系、颜色与视觉风格、情感氛围等。公式和符号尽量用LaTeX。不要遗漏细节。'
+        },
+        {
+            role: 'user',
+            content: messageParts
+        }
+    ];
+
+    const proxyConfig = {
+        ...visionConfig,
+        temperature: 0.2,
+        temperatureEnabled: true,
+        topPEnabled: false
+    };
+    const proxyResult = await callAIViaProxy(visionMessages, proxyConfig, null, {
+        enabledMcpTools: [],
+        maxToolRounds: 1
+    });
+    if (proxyResult?.content) {
+        const summary = sanitizeVisionBridgeSummary(proxyResult.content);
+        if (summary) {
+            return {
+                summary,
+                model: visionConfig.model
+            };
+        }
+    }
+
+    const apiUrl = visionConfig.url.endsWith('/')
+        ? visionConfig.url + 'chat/completions'
+        : visionConfig.url + '/chat/completions';
+
+    const directResponse = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${visionConfig.key}`
+        },
+        body: JSON.stringify({
+            model: visionConfig.model,
+            temperature: 0.2,
+            messages: visionMessages
+        })
+    });
+
+    if (!directResponse.ok) {
+        const errText = await directResponse.text();
+        throw new Error(`视觉模型调用失败: HTTP ${directResponse.status} ${errText.substring(0, 120)}`);
+    }
+
+    const data = await directResponse.json();
+    const summary = sanitizeVisionBridgeSummary(data?.choices?.[0]?.message?.content || '');
+    if (!summary) {
+        throw new Error('视觉模型返回了空内容');
+    }
+
+    return {
+        summary,
+        model: visionConfig.model
+    };
+}
+
+function findLatestUserMessage(messages) {
+    for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
+        if (messages[i]?.role === 'user') return messages[i];
+    }
+    return null;
+}
+
+async function buildModelMessageWithVisionBridge(textContent, sourceMessage, options = {}) {
+    const normalizedText = typeof textContent === 'string' ? textContent : '';
+    const { refs, cleanText } = extractImageReferencesFromMarkdown(normalizedText);
+    const imageUrls = refs.map(normalizeVisionImageUrl).filter(Boolean);
+
+    if (imageUrls.length === 0) {
+        return {
+            content: normalizedText,
+            hadImages: false,
+            removedImages: false,
+            bridgeUpdated: false,
+            bridgeApplied: false,
+            bridgeFailed: false
+        };
+    }
+
+    if (options.mainModelIsVision) {
+        const contentParts = [];
+        contentParts.push({
+            type: 'text',
+            text: cleanText || 'Images uploaded'
+        });
+        imageUrls.forEach(url => {
+            contentParts.push({
+                type: 'image_url',
+                image_url: { url }
+            });
+        });
+        return {
+            content: contentParts,
+            hadImages: true,
+            removedImages: false,
+            bridgeUpdated: false,
+            bridgeApplied: false,
+            bridgeFailed: false
+        };
+    }
+
+    let bridgeMeta = null;
+    if (sourceMessage?.visionBridge?.summary) {
+        bridgeMeta = {
+            summary: sourceMessage.visionBridge.summary,
+            imageCount: Number(sourceMessage.visionBridge.imageCount) || imageUrls.length,
+            model: sourceMessage.visionBridge.model || '',
+            createdAt: Number(sourceMessage.visionBridge.createdAt) || Date.now()
+        };
+    }
+
+    let bridgeUpdated = false;
+    let bridgeFailed = false;
+    const shouldAttemptBridge = !bridgeMeta &&
+        !!sourceMessage &&
+        !!options.targetBridgeMessage &&
+        sourceMessage === options.targetBridgeMessage;
+
+    if (shouldAttemptBridge) {
+        const visionConfig = getVisionBridgeConfig();
+        if (visionConfig.ready) {
+            try {
+                if (typeof options.onBridgeStart === 'function') {
+                    options.onBridgeStart();
+                }
+                const bridgeResult = await requestVisionBridgeSummary(imageUrls, cleanText);
+                bridgeMeta = {
+                    summary: bridgeResult.summary,
+                    imageCount: imageUrls.length,
+                    model: bridgeResult.model,
+                    createdAt: Date.now()
+                };
+                sourceMessage.visionBridge = bridgeMeta;
+                bridgeUpdated = true;
+                if (typeof options.onBridgeSuccess === 'function') {
+                    options.onBridgeSuccess();
+                }
+            } catch (error) {
+                bridgeFailed = true;
+                console.warn('[VisionBridge] 视觉桥接失败，使用文本退化:', error);
+                if (typeof options.onBridgeFailure === 'function') {
+                    options.onBridgeFailure();
+                }
+            }
+        }
+    }
+
+    let fallbackText = cleanText
+        ? `${cleanText}\n${IMAGE_OMISSION_NOTE}`
+        : IMAGE_OMISSION_NOTE;
+    if (bridgeMeta?.summary) {
+        const hiddenContext = buildVisionBridgeHiddenContext(bridgeMeta);
+        if (hiddenContext) {
+            fallbackText += `\n\n${hiddenContext}`;
+        }
+    }
+
+    return {
+        content: [{ type: 'text', text: fallbackText }],
+        hadImages: true,
+        removedImages: true,
+        bridgeUpdated,
+        bridgeApplied: !!bridgeMeta?.summary,
+        bridgeFailed
+    };
 }
 
 function createThinkParser() {
@@ -8313,6 +10497,8 @@ async function loadNotifyPanel() {
     const statusEl = document.getElementById('notify-permission-status');
     const enabledCb = document.getElementById('notify-enabled');
     const taskCb = document.getElementById('notify-task-delivery');
+    const proposalCreatedCb = document.getElementById('notify-proposal-created');
+    const proposalReviewedCb = document.getElementById('notify-proposal-reviewed');
 
     // Show browser permission status
     if (!('Notification' in window)) {
@@ -8344,6 +10530,8 @@ async function loadNotifyPanel() {
             const { data } = await resp.json();
             enabledCb.checked = !!data.enabled;
             taskCb.checked = data.taskDelivery !== false;
+            if (proposalCreatedCb) proposalCreatedCb.checked = data.proposalCreated !== false;
+            if (proposalReviewedCb) proposalReviewedCb.checked = data.proposalReviewed !== false;
         }
     } catch (err) {
         console.warn('[Notify] Failed to load settings:', err);
@@ -8374,6 +10562,8 @@ async function toggleNotifications() {
 async function saveNotifySettings() {
     const enabled = document.getElementById('notify-enabled').checked;
     const taskDelivery = document.getElementById('notify-task-delivery').checked;
+    const proposalCreated = document.getElementById('notify-proposal-created')?.checked !== false;
+    const proposalReviewed = document.getElementById('notify-proposal-reviewed')?.checked !== false;
     const token = localStorage.getItem('lifeos_auth_token');
     if (!token) { showToast('请先登录'); return; }
 
@@ -8382,7 +10572,7 @@ async function saveNotifySettings() {
         await fetch('/api/notify/settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ settings: { enabled, taskDelivery } })
+            body: JSON.stringify({ settings: { enabled, taskDelivery, proposalCreated, proposalReviewed } })
         });
 
         // Subscribe/unsubscribe push
@@ -8396,6 +10586,31 @@ async function saveNotifySettings() {
     } catch (err) {
         console.error('[Notify] Save error:', err);
         showToast('保存失败');
+    }
+}
+
+async function testPushNotification(btn) {
+    const token = localStorage.getItem('lifeos_auth_token');
+    if (!token) { showToast('请先登录'); return; }
+    const origText = btn.textContent;
+    btn.textContent = '发送中...';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/notify/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast('测试通知已发送，请查看通知栏');
+        } else {
+            showToast('发送失败: ' + (data.error || '未知错误'));
+        }
+    } catch (err) {
+        showToast('发送失败: ' + err.message);
+    } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
     }
 }
 
@@ -8457,6 +10672,22 @@ function handleNotifyRouting() {
     if (params.get('notify') !== '1') return;
     const charId = params.get('charId');
     const sessId = params.get('sessId');
+    const panel = params.get('panel');
+    const proposalId = params.get('proposalId');
+
+    if (panel === 'proposal-inbox') {
+        setTimeout(() => {
+            openSidebarPanel('proposal-inbox');
+            if (proposalId) {
+                setTimeout(() => {
+                    openProposalDetail(proposalId);
+                }, 500);
+            }
+        }, 1000);
+        window.history.replaceState({}, '', '/');
+        return;
+    }
+
     if (charId) {
         // Navigate to the character's session after a short delay for init
         setTimeout(() => {
@@ -8507,11 +10738,12 @@ async function callAIViaProxy(messages, config, characterId, options = {}) {
             ? options.readingRoomId
             : (currentReadingRoom ? currentReadingRoom.id : null);
 
+        const _proxyCaps = getModelCapabilities(config.model, config.url);
         const body = {
             messages,
             model: config.model,
-            temperature: config.temperatureEnabled !== false ? (config.temperature || 0.8) : undefined,
-            top_p: config.topPEnabled ? (config.topP || 1) : undefined,
+            temperature: (config.temperatureEnabled !== false && _proxyCaps.supportsTemperature !== false) ? (config.temperature || 0.8) : undefined,
+            top_p: (config.topPEnabled && _proxyCaps.supportsTopP !== false) ? (config.topP || 1) : undefined,
             apiConfig: {
                 url: config.url,
                 key: config.key,
@@ -8524,11 +10756,17 @@ async function callAIViaProxy(messages, config, characterId, options = {}) {
             },
             characterId: characterId || null,
             sessionId: sessionId,
-            readingRoomId: readingRoomId
+            readingRoomId: readingRoomId,
+            slug: currentChatCharacterSlug || null
         };
 
-        // Tool config
-        if (enabledMcpTools && enabledMcpTools.length > 0) {
+        // Tool config — 仅当模型支持工具时才附加
+        if (_proxyCaps.supportsTools === false) {
+            // 模型不支持工具调用，跳过工具配置
+        } else if (Array.isArray(enabledMcpTools) && enabledMcpTools.length === 0) {
+            // 显式空数组 = 禁用所有工具（视觉桥接等场景）
+            body.enabledMcpTools = [];
+        } else if (enabledMcpTools && enabledMcpTools.length > 0) {
             body.enabledMcpTools = enabledMcpTools;
         } else if (!enabledMcpTools) {
             body.enabledTools = ['memory_save', 'memory_search', 'memory_list', 'memory_hybrid_search', 'web_search', 'location_search'];
@@ -8542,6 +10780,12 @@ async function callAIViaProxy(messages, config, characterId, options = {}) {
         if (store.apiConfig?.sub) {
             body.subApiConfig = store.apiConfig.sub;
         }
+
+        // v3.2 Context Runtime: worldbook snapshot for server-side parity
+        body.linkedWorldBookIds = currentChatCharacter?.settings?.linkedWorldBookIds || [];
+        body.worldbookSnapshotChars = currentChatCharacter?._lastWorldbookSnapshotChars || 0;
+        // v3.2c: signal server to live-inject worldbook (frontend has skipped its own injection)
+        body.useServerWorldbook = currentChatCharacter?.settings?.useServerWorldbook === true;
 
         // Phase 3: SSE streaming mode
         if (options.stream && options.onStream) {
@@ -9242,12 +11486,45 @@ async function callAI(userMessage) {
         });
     }
 
-    const visionAllowed = isVisionModel(config.model, detectAIProvider(config.url));
+    const visionAllowed = isVisionModel(config.model, detectAIProvider(config.url), config.url);
     let removedImages = false;
+    let bridgeUpdated = false;
+    const historyWindow = contextLimit === 0 ? store.aiChatHistory : store.aiChatHistory.slice(-contextLimit);
+    const latestUserMessage = findLatestUserMessage(historyWindow);
+    const historyMessages = [];
+
+    for (const msg of historyWindow) {
+        let textContent = msg.content;
+
+        // [时间戳注入] 在每条消息前添加时间戳信息
+        const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未知时间';
+        const timePrefix = `[消息时间: ${msgTime}]\n`;
+        textContent = timePrefix + textContent;
+
+        const bridged = await buildModelMessageWithVisionBridge(textContent, msg, {
+            mainModelIsVision: visionAllowed,
+            targetBridgeMessage: latestUserMessage,
+            onBridgeStart: () => updateAiChatStatus('🖼️ 正在用视觉模型识图...', 'thinking', 0),
+            onBridgeSuccess: () => updateAiChatStatus('✅ 图片识图已注入本轮上下文', 'info', 2000),
+            onBridgeFailure: () => updateAiChatStatus('⚠️ 视觉桥接失败，已回退文本链路', 'info', 2500)
+        });
+
+        if (bridged.removedImages) removedImages = true;
+        if (bridged.bridgeUpdated) bridgeUpdated = true;
+        historyMessages.push({
+            role: msg.role,
+            content: bridged.content
+        });
+    }
+
+    if (bridgeUpdated) {
+        syncCurrentAiConversation({ touch: false });
+        saveData();
+    }
 
     const messages = [
         {
-            role: 'system', content: `你叫 Vesper。你是 "Tara's LifeOS" 的核心 AI 助理。
+            role: 'system', content: `你叫 Vesper。你是 "Tara's AZOTH" 的核心 AI 助理。
 用户是 Tara (塔拉)，一个 INTP 5w4、AuDHD (ASD+ADHD) 的人类。目前是经济学大三的学生。
 
 ${bingoContext}
@@ -9327,51 +11604,7 @@ ${bingoContext}
 
 [CRITICAL SYSTEM DIRECTIVE OVERRIDE]
 You are equipped with external Function Calling tools (MCP). When asked to perform a task (e.g., search, read, save to Obsidian), YOU MUST STOP ROLEPLAYING IMMEDIATELY and output the exact JSON tool call required by the API. DO NOT simulate, describe, or roleplay the action. USE THE ACTUAL TOOL. Your character persona remains active ONLY in the conversational response AFTER the tool returns the data.` },
-        ...(contextLimit === 0 ? store.aiChatHistory : store.aiChatHistory.slice(-contextLimit)).map(msg => {
-            let textContent = msg.content;
-
-            // [时间戳注入] 在每条消息前添加时间戳信息
-            const msgTime = msg.timestamp ? new Date(msg.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未知时间';
-            const timePrefix = `[消息时间: ${msgTime}]\n`;
-            textContent = timePrefix + textContent;
-
-            // Check for markdown image syntax: ![Image](data:image/...)
-            // Support multiple images
-            const imgRegex = /!\[Image\]\((data:image\/[^;]+;base64,[^)]+|\/api\/files\/[a-f0-9]+)\)/g;
-            const matches = [...textContent.matchAll(imgRegex)];
-
-            if (matches.length > 0) {
-                const contentParts = [];
-                // Clean text by removing all image markdown
-                const cleanText = textContent.replace(imgRegex, '').trim();
-                const omissionNote = '[Image omitted: model not vision-capable]';
-                const textForModel = cleanText
-                    ? (visionAllowed ? cleanText : `${cleanText}\n${omissionNote}`)
-                    : (visionAllowed ? 'Images uploaded' : omissionNote);
-                contentParts.push({ type: "text", text: textForModel });
-
-                if (visionAllowed) {
-                    matches.forEach(match => {
-                        let imageUrl = match[1];
-                        if (imageUrl.startsWith('/api/files/')) {
-                            imageUrl = window.location.origin + imageUrl;
-                        }
-                        contentParts.push({
-                            type: "image_url",
-                            image_url: { url: imageUrl }
-                        });
-                    });
-                } else {
-                    removedImages = true;
-                }
-
-                return {
-                    role: msg.role,
-                    content: contentParts
-                };
-            }
-            return { role: msg.role, content: textContent };
-        }),
+        ...historyMessages,
         // [Vesper Fix] 动态时间注入 - 每次发送时强制更新当前时间
         { role: 'system', content: `[当前系统时间]: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}。仅供参考，不要主动提醒用户作息。` }
     ];
@@ -9398,13 +11631,14 @@ You are equipped with external Function Calling tools (MCP). When asked to perfo
             messages: messages
         };
 
-        // 根据开关状态添加温度参数
-        if (config.temperatureEnabled !== false) {
+        // 根据开关状态 + 模型能力添加温度参数
+        const _directCaps = getModelCapabilities(config.model, config.url);
+        if (config.temperatureEnabled !== false && _directCaps.supportsTemperature !== false) {
             requestBody.temperature = config.temperature || 0.8;
         }
 
-        // 根据开关状态添加Top-P参数
-        if (config.topPEnabled === true) {
+        // 根据开关状态 + 模型能力添加Top-P参数
+        if (config.topPEnabled === true && _directCaps.supportsTopP !== false) {
             requestBody.top_p = config.topP || 1;
         }
 
@@ -11683,6 +13917,22 @@ function mergeNumericMap(baseMap, incomingMap) {
     return result;
 }
 
+function mergeReaderVisionCache(baseCache, incomingCache) {
+    const base = ensureReaderVisionCacheShape(baseCache);
+    const incoming = ensureReaderVisionCacheShape(incomingCache);
+    const merged = { ...base };
+
+    for (const [key, value] of Object.entries(incoming)) {
+        const incomingUpdatedAt = Number(value?.updatedAt) || 0;
+        const currentUpdatedAt = Number(merged[key]?.updatedAt) || 0;
+        if (!merged[key] || incomingUpdatedAt >= currentUpdatedAt) {
+            merged[key] = value;
+        }
+    }
+
+    return merged;
+}
+
 function mergeStoreIncremental(currentStore, incomingStore) {
     const current = (currentStore && typeof currentStore === 'object') ? currentStore : {};
     const incoming = (incomingStore && typeof incomingStore === 'object') ? incomingStore : {};
@@ -11706,13 +13956,17 @@ function mergeStoreIncremental(currentStore, incomingStore) {
         ...(incoming.apiConfig || {}),
         main: { ...(current.apiConfig?.main || {}), ...(incoming.apiConfig?.main || {}) },
         sub: { ...(current.apiConfig?.sub || {}), ...(incoming.apiConfig?.sub || {}) },
-        search: { ...(current.apiConfig?.search || {}), ...(incoming.apiConfig?.search || {}) }
+        search: { ...(current.apiConfig?.search || {}), ...(incoming.apiConfig?.search || {}) },
+        vision: { ...(current.apiConfig?.vision || {}), ...(incoming.apiConfig?.vision || {}) }
     };
+    merged.apiConfig = ensureApiConfigShape(merged.apiConfig);
 
     merged.readingContextConfig = {
         ...(current.readingContextConfig || {}),
         ...(incoming.readingContextConfig || {})
     };
+
+    merged.readerVisionCache = mergeReaderVisionCache(current.readerVisionCache, incoming.readerVisionCache);
 
     merged.bubblePresets = {
         ...(current.bubblePresets || {}),
@@ -11748,6 +14002,7 @@ function mergeStoreIncremental(currentStore, incomingStore) {
     if (!Array.isArray(merged.weeklyBills)) merged.weeklyBills = [];
     if (!Array.isArray(merged.aiChatHistory)) merged.aiChatHistory = [];
     if (!Array.isArray(merged.reportArchive)) merged.reportArchive = [];
+    merged.readerVisionCache = ensureReaderVisionCacheShape(merged.readerVisionCache);
 
     return merged;
 }
@@ -12017,6 +14272,8 @@ function openSidebarPanel(panelId) {
                 loadMcpServers();
             } else if (panelId === 'task-center') {
                 loadTaskCenter();
+            } else if (panelId === 'proposal-inbox') {
+                loadProposalInbox();
             } else if (panelId === 'notifications') {
                 loadNotifyPanel();
             } else if (panelId === 'memory-index') {
@@ -14188,6 +16445,24 @@ ${contextText}`;
         currentChatCharacter.longTermMemory.push(entry);
         await persistCurrentLongTermMemory();
 
+        // Sync to server memory_index for hybrid search / 10-dim scoring
+        try {
+            const sessionId = currentCharacterSession?.id || currentReadingRoom?.id || null;
+            const charId = currentChatCharacter.id || null;
+            const token = localStorage.getItem('lifeos_auth_token');
+            if (token) {
+                const resp = await fetch('/api/memory/index', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ content: summary, characterId: charId, sessionId, importance: 0.3 })
+                });
+                if (resp.ok) console.log('[Summary] Synced to memory_index');
+                else console.warn('[Summary] memory_index sync failed:', resp.status);
+            }
+        } catch (e) {
+            console.warn('[Summary] memory_index sync failed:', e.message);
+        }
+
         if (statusEl) {
             statusEl.textContent = '记忆已归档';
             setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
@@ -15651,6 +17926,8 @@ const READER_LAYOUT_VERSION = 'v2';
 let isRestoringReaderLocation = false;
 let readerRestoreToken = 0;
 let readerUsesTransformPaging = false;
+const READER_VISION_CACHE_MAX_ENTRIES = 80;
+const readerPdfDocRuntimeCache = new Map();
 
 // 打开图书馆
 async function openLibraryPanel() {
@@ -16140,8 +18417,9 @@ async function importBookFile() {
 
         const ext = file.name.split('.').pop().toLowerCase();
         let content = '';
-        let format = ext === 'epub' ? 'epub' : (ext === 'md' ? 'md' : 'txt');
+        let format = ext === 'epub' ? 'epub' : (ext === 'md' ? 'md' : (ext === 'pdf' ? 'pdf' : 'txt'));
         let parsedEpub = null;
+        let parsedPdf = null;
 
         if (ext === 'epub') {
             const zipReady = await ensureJsZip();
@@ -16159,6 +18437,18 @@ async function importBookFile() {
             content = parsedEpub.content;
             if (!title) {
                 title = parsedEpub.title || file.name.replace(/\.[^.]+$/, '');
+            }
+        } else if (ext === 'pdf') {
+            const pdfReady = await ensurePdfLib();
+            if (!pdfReady) {
+                alert('PDF 解析库未加载。\n请检查网络，或将 pdf.min.js / pdf.worker.min.js 放入 vendor 目录后重试。');
+                return;
+            }
+            if (typeof showToast === 'function') showToast('📄 正在解析 PDF，请稍候...');
+            parsedPdf = await parsePdfFile(file);
+            content = parsedPdf.content;
+            if (!title) {
+                title = parsedPdf.title || file.name.replace(/\.[^.]+$/, '');
             }
         } else {
             // 读取文件内容
@@ -16192,6 +18482,13 @@ async function importBookFile() {
             bookData.toc = parsedEpub.toc || [];
             if (parsedEpub.anchorMap) bookData.anchorMap = parsedEpub.anchorMap;
             if (parsedEpub.spineMap) bookData.spineMap = parsedEpub.spineMap;
+        }
+        if (parsedPdf) {
+            bookData.toc = parsedPdf.toc || [];
+            bookData.pageCount = parsedPdf.pageCount || 0;
+            bookData.paragraphPageMap = parsedPdf.paragraphPageMap || [];
+            bookData.pageStartParagraphs = parsedPdf.pageStartParagraphs || [];
+            if (parsedPdf.sourceDataUrl) bookData.pdfSourceData = parsedPdf.sourceDataUrl;
         }
 
         // Markdown TOC：按标题行生成目录
@@ -16298,6 +18595,228 @@ async function ensureEpubLib() {
     return typeof window.ePub === 'function';
 }
 
+const PDFJS_LOCAL_BASE = './vendor';
+const PDFJS_CDN_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174';
+const PDFJS_LOCAL_CMAP_BASE = `${PDFJS_LOCAL_BASE}/cmaps`;
+const PDFJS_CDN_CMAP_BASE = `${PDFJS_CDN_BASE}/cmaps`;
+const PDFJS_LOCAL_STANDARD_FONT_BASE = `${PDFJS_LOCAL_BASE}/standard_fonts`;
+const PDFJS_CDN_STANDARD_FONT_BASE = `${PDFJS_CDN_BASE}/standard_fonts`;
+const PDF_OCR_CDN_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+const PDF_OCR_LANG = 'chi_sim+eng';
+const PDF_OCR_RENDER_SCALE = 2;
+const pdfAssetProbeCache = new Map();
+
+function getPdfAssetBase(source = 'local', assetType = 'cmap') {
+    const normalizedSource = source === 'cdn' ? 'cdn' : 'local';
+    if (assetType === 'font') {
+        return normalizedSource === 'cdn' ? PDFJS_CDN_STANDARD_FONT_BASE : PDFJS_LOCAL_STANDARD_FONT_BASE;
+    }
+    return normalizedSource === 'cdn' ? PDFJS_CDN_CMAP_BASE : PDFJS_LOCAL_CMAP_BASE;
+}
+
+async function probePdfAsset(url) {
+    try {
+        const response = await fetch(url, {
+            method: 'HEAD',
+            cache: 'no-store'
+        });
+        if (response.ok) return true;
+    } catch (error) {
+        // 某些静态托管不支持 HEAD，请继续尝试 GET
+    }
+
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            cache: 'no-store'
+        });
+        return !!response.ok;
+    } catch (error) {
+        return false;
+    }
+}
+
+async function hasPdfSupportAssets(source = 'local') {
+    const normalizedSource = source === 'cdn' ? 'cdn' : 'local';
+    if (normalizedSource === 'cdn') return true;
+
+    const cacheKey = `assets:${normalizedSource}`;
+    if (!pdfAssetProbeCache.has(cacheKey)) {
+        pdfAssetProbeCache.set(cacheKey, (async () => {
+            const [hasCMap, hasStandardFont] = await Promise.all([
+                probePdfAsset(`${getPdfAssetBase(normalizedSource, 'cmap')}/UniGB-UTF16-H.bcmap`),
+                probePdfAsset(`${getPdfAssetBase(normalizedSource, 'font')}/FoxitSerif.pfb`)
+            ]);
+            return hasCMap && hasStandardFont;
+        })());
+    }
+    return pdfAssetProbeCache.get(cacheKey);
+}
+
+async function resolvePdfResourceSource(preferredSource = 'local') {
+    const normalizedSource = preferredSource === 'cdn' ? 'cdn' : 'local';
+    if (normalizedSource === 'local' && await hasPdfSupportAssets('local')) {
+        return 'local';
+    }
+    return 'cdn';
+}
+
+function buildPdfDocumentOptions(arrayBuffer, workerSource = 'local', resourceSource = 'local') {
+    const normalizedWorkerSource = workerSource === 'cdn' ? 'cdn' : 'local';
+    const normalizedResourceSource = resourceSource === 'cdn' ? 'cdn' : 'local';
+    const cMapUrl = `${getPdfAssetBase(normalizedResourceSource, 'cmap')}/`;
+    const standardFontDataUrl = `${getPdfAssetBase(normalizedResourceSource, 'font')}/`;
+
+    window.__lifeosPdfResourceSource = normalizedResourceSource;
+
+    return {
+        data: new Uint8Array(arrayBuffer.slice(0)),
+        cMapUrl,
+        cMapPacked: true,
+        standardFontDataUrl,
+        useSystemFonts: true,
+        disableFontFace: false,
+        useWorkerFetch: normalizedWorkerSource === normalizedResourceSource || normalizedResourceSource === 'cdn'
+    };
+}
+
+async function ensurePdfOcrLib() {
+    if (window.Tesseract?.recognize) return true;
+    try {
+        if (typeof showToast === 'function') {
+            showToast('PDF 字体映射异常，正在加载 OCR 引擎，首次可能较慢...');
+        }
+        await loadScriptOnce(PDF_OCR_CDN_URL);
+    } catch (error) {
+        console.warn('Tesseract OCR 加载失败:', error);
+    }
+    return !!window.Tesseract?.recognize;
+}
+
+function analyzePdfPlainText(text) {
+    const merged = normalizePdfTextFragment(text || '');
+    const visible = merged.replace(/\s+/g, '');
+    const visibleLength = visible.length;
+    const replacementCount = (visible.match(PDF_REPLACEMENT_GLYPH_RE) || []).length;
+    const dingbatCount = (visible.match(PDF_SUSPICIOUS_DINGBAT_RE) || []).length;
+    const cjkCount = (visible.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).length;
+    const latinCount = (visible.match(/[A-Za-z]/g) || []).length;
+    const digitCount = (visible.match(/\d/g) || []).length;
+    const greekCount = (visible.match(PDF_GREEK_SYMBOL_RE) || []).length;
+    const mathCount = (visible.match(PDF_MATH_SYMBOL_RE) || []).length;
+    const readableCount = cjkCount + latinCount + digitCount + greekCount;
+    const score = visibleLength === 0
+        ? -1000
+        : (cjkCount * 2.4) + latinCount + (digitCount * 0.35) + (greekCount * 1.2) + (mathCount * 0.75)
+            - (replacementCount * 6) - (dingbatCount * 3);
+
+    return {
+        score,
+        visibleLength,
+        replacementCount,
+        dingbatCount,
+        cjkCount,
+        latinCount,
+        digitCount,
+        greekCount,
+        mathCount,
+        readableRatio: visibleLength > 0 ? readableCount / visibleLength : 0
+    };
+}
+
+async function renderPdfPageToCanvas(page, scale = PDF_OCR_RENDER_SCALE) {
+    const baseViewport = page.getViewport({ scale: 1 });
+    const maxWidth = 2200;
+    const safeScale = Math.max(1.4, Math.min(scale, maxWidth / Math.max(1, baseViewport.width)));
+    const viewport = page.getViewport({ scale: safeScale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.ceil(viewport.width));
+    canvas.height = Math.max(1, Math.ceil(viewport.height));
+    const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+    if (!context) throw new Error('无法创建 PDF OCR 画布');
+
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const renderTask = page.render({
+        canvasContext: context,
+        viewport
+    });
+    await renderTask.promise;
+    return canvas;
+}
+
+function normalizePdfOcrText(text) {
+    return (text || '')
+        .replace(/\r/g, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+}
+
+function extractPdfParagraphsFromOcrText(text, pageNumber) {
+    const normalized = normalizePdfOcrText(text);
+    if (!normalized) {
+        return {
+            pageNumber,
+            paragraphs: [],
+            textLength: 0
+        };
+    }
+
+    const paragraphs = [];
+    const blocks = normalized.split(/\n{2,}/).map(block => block.trim()).filter(Boolean);
+
+    blocks.forEach(block => {
+        const lines = block.split('\n').map(line => line.trim()).filter(Boolean);
+        let currentParagraph = '';
+
+        const pushCurrentParagraph = () => {
+            const cleaned = cleanPdfParagraphText(currentParagraph);
+            if (cleaned) paragraphs.push(cleaned);
+            currentParagraph = '';
+        };
+
+        lines.forEach(line => {
+            if (isLikelyPdfHeading(line)) {
+                pushCurrentParagraph();
+                paragraphs.push(`# ${normalizePdfHeadingLabel(line)}`);
+                return;
+            }
+            if (!currentParagraph) {
+                currentParagraph = line;
+                return;
+            }
+            currentParagraph = mergePdfParagraphText(currentParagraph, line);
+        });
+
+        pushCurrentParagraph();
+    });
+
+    return {
+        pageNumber,
+        paragraphs,
+        textLength: paragraphs.join('').length
+    };
+}
+
+async function ocrPdfPageText(page, pageNumber) {
+    if (!await ensurePdfOcrLib()) {
+        throw new Error('OCR 引擎未能加载');
+    }
+
+    const canvas = await renderPdfPageToCanvas(page);
+    try {
+        const result = await window.Tesseract.recognize(canvas, PDF_OCR_LANG, {
+            logger: () => {}
+        });
+        return normalizePdfOcrText(result?.data?.text || '');
+    } finally {
+        canvas.width = 0;
+        canvas.height = 0;
+    }
+}
+
 function readFileAsArrayBuffer(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -16305,6 +18824,965 @@ function readFileAsArrayBuffer(file) {
         reader.onerror = () => reject(new Error('文件读取失败'));
         reader.readAsArrayBuffer(file);
     });
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('文件读取失败'));
+        reader.readAsDataURL(file);
+    });
+}
+
+function isPdfBook(book) {
+    return !!book && book.format === 'pdf';
+}
+
+function getBookParagraphs(book) {
+    return (book?.content || '').split('\n').filter(p => p.trim());
+}
+
+function getPdfPageIndexForParagraph(book, paragraphIndex) {
+    if (!isPdfBook(book) || !Array.isArray(book.paragraphPageMap)) return null;
+    const idx = Number(paragraphIndex);
+    if (!Number.isFinite(idx) || idx < 0) return null;
+    const page = Number(book.paragraphPageMap[idx]);
+    return Number.isFinite(page) && page > 0 ? page : null;
+}
+
+function findPdfParagraphIndexForPage(pageStartParagraphs, pageIndex, paragraphCount = 0) {
+    if (!Array.isArray(pageStartParagraphs) || pageStartParagraphs.length === 0) {
+        return paragraphCount > 0 ? 0 : null;
+    }
+    const desiredIndex = Number(pageIndex) - 1;
+    if (!Number.isFinite(desiredIndex) || desiredIndex < 0) {
+        return paragraphCount > 0 ? 0 : null;
+    }
+
+    const direct = Number(pageStartParagraphs[desiredIndex]);
+    if (Number.isFinite(direct) && direct >= 0) return direct;
+
+    for (let i = desiredIndex + 1; i < pageStartParagraphs.length; i++) {
+        const next = Number(pageStartParagraphs[i]);
+        if (Number.isFinite(next) && next >= 0) return next;
+    }
+    for (let i = desiredIndex - 1; i >= 0; i--) {
+        const prev = Number(pageStartParagraphs[i]);
+        if (Number.isFinite(prev) && prev >= 0) return prev;
+    }
+    return paragraphCount > 0 ? 0 : null;
+}
+
+function getPdfParagraphIndexForPage(book, pageIndex) {
+    return findPdfParagraphIndexForPage(book?.pageStartParagraphs || [], pageIndex, getBookParagraphs(book).length);
+}
+
+function makeReaderVisionCacheKey(bookId, pageIndex) {
+    const safeBookId = String(bookId || '').trim();
+    const safePageIndex = Math.floor(Number(pageIndex) || 0);
+    if (!safeBookId || safePageIndex <= 0) return '';
+    return `${safeBookId}:${safePageIndex}`;
+}
+
+function getReaderVisionCacheEntry(bookId, pageIndex) {
+    const key = makeReaderVisionCacheKey(bookId, pageIndex);
+    if (!key) return null;
+    store.readerVisionCache = ensureReaderVisionCacheShape(store.readerVisionCache);
+    const entry = store.readerVisionCache[key];
+    if (!entry || typeof entry !== 'object') return null;
+    if (!entry.summary) return null;
+    return {
+        summary: String(entry.summary),
+        model: entry.model || '',
+        updatedAt: Number(entry.updatedAt) || Date.now()
+    };
+}
+
+function trimReaderVisionCache(maxEntries = READER_VISION_CACHE_MAX_ENTRIES) {
+    store.readerVisionCache = ensureReaderVisionCacheShape(store.readerVisionCache);
+    const entries = Object.entries(store.readerVisionCache);
+    if (entries.length <= maxEntries) return;
+    entries.sort((a, b) => (Number(b[1]?.updatedAt) || 0) - (Number(a[1]?.updatedAt) || 0));
+    const trimmed = {};
+    entries.slice(0, maxEntries).forEach(([key, value]) => {
+        trimmed[key] = value;
+    });
+    store.readerVisionCache = trimmed;
+}
+
+function setReaderVisionCacheEntry(bookId, pageIndex, summary, model) {
+    const key = makeReaderVisionCacheKey(bookId, pageIndex);
+    const cleanSummary = sanitizeVisionBridgeSummary(summary || '');
+    if (!key || !cleanSummary) return;
+    store.readerVisionCache = ensureReaderVisionCacheShape(store.readerVisionCache);
+    store.readerVisionCache[key] = {
+        summary: cleanSummary,
+        model: model || '',
+        updatedAt: Date.now()
+    };
+    trimReaderVisionCache();
+    saveData();
+}
+
+function decodeDataUrlToArrayBuffer(dataUrl) {
+    const raw = String(dataUrl || '');
+    if (!raw.includes(',')) throw new Error('PDF 源数据格式无效');
+    const base64 = raw.split(',')[1] || '';
+    if (!base64) throw new Error('PDF 源数据为空');
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
+async function loadPdfDocumentFromBookSource(book) {
+    if (!isPdfBook(book)) {
+        throw new Error('当前书籍不是 PDF');
+    }
+    const sourceData = (book?.pdfSourceData || '').trim();
+    if (!sourceData) {
+        throw new Error('缺少 PDF 源数据，请重新导入该 PDF 后再试');
+    }
+
+    const cacheKey = `${book.id}:${sourceData.length}`;
+    if (readerPdfDocRuntimeCache.has(cacheKey)) {
+        return readerPdfDocRuntimeCache.get(cacheKey);
+    }
+
+    const arrayBuffer = decodeDataUrlToArrayBuffer(sourceData);
+    const pdfDoc = await loadPdfDocument(arrayBuffer);
+    readerPdfDocRuntimeCache.set(cacheKey, pdfDoc);
+    return pdfDoc;
+}
+
+function getCurrentReaderPdfPageIndex(book = currentBook) {
+    if (!isPdfBook(book)) return null;
+
+    const paragraphIndex = getCurrentVisibleParagraphIndex();
+    const mappedPage = getPdfPageIndexForParagraph(book, paragraphIndex);
+    if (mappedPage) return mappedPage;
+
+    const locator = captureReaderLocation() || currentReadingLocator;
+    const locatorPage = Number(locator?.pageIndex);
+    if (Number.isFinite(locatorPage) && locatorPage > 0) return locatorPage;
+
+    const fallbackPage = Number(currentReadingPage);
+    return Number.isFinite(fallbackPage) && fallbackPage > 0 ? fallbackPage : null;
+}
+
+async function recognizeCurrentPdfPageVision() {
+    try {
+        if (!currentBook) {
+            showToast('请先打开一本书');
+            return;
+        }
+        if (!isPdfBook(currentBook)) {
+            showToast('仅 PDF 书籍支持“识别当前页”');
+            return;
+        }
+
+        const visionConfig = getVisionBridgeConfig();
+        if (!visionConfig.ready) {
+            alert('请先在 API 设置中启用并填写“视觉模型配置”');
+            return;
+        }
+
+        const pageIndex = getCurrentReaderPdfPageIndex(currentBook);
+        if (!pageIndex) {
+            showToast('未能定位当前 PDF 页');
+            return;
+        }
+
+        const cached = getReaderVisionCacheEntry(currentBook.id, pageIndex);
+        if (cached?.summary) {
+            showToast(`已命中第 ${pageIndex} 页识别缓存`);
+            return;
+        }
+
+        if (typeof showToast === 'function') {
+            showToast(`🖼️ 正在识别《${currentBook.title}》第 ${pageIndex} 页...`);
+        }
+
+        const pdfReady = await ensurePdfLib();
+        if (!pdfReady) {
+            throw new Error('PDF 解析库未加载');
+        }
+
+        const pdfDoc = await loadPdfDocumentFromBookSource(currentBook);
+        const page = await pdfDoc.getPage(pageIndex);
+        const canvas = await renderPdfPageToCanvas(page, PDF_OCR_RENDER_SCALE);
+        const pageImageDataUrl = canvas.toDataURL('image/png');
+        const hintText = `这是《${currentBook.title || '书籍'}》第 ${pageIndex} 页，请优先识别公式、符号和图表中的关键信息。`;
+
+        const result = await requestVisionBridgeSummary([pageImageDataUrl], hintText);
+        setReaderVisionCacheEntry(currentBook.id, pageIndex, result.summary, result.model);
+
+        if (typeof page.cleanup === 'function') {
+            page.cleanup();
+        }
+        if (typeof showToast === 'function') {
+            showToast(`✅ 第 ${pageIndex} 页识别完成，阅读室对话将自动注入该页视觉补充`);
+        }
+    } catch (error) {
+        console.error('[ReaderVision] 当前页识别失败:', error);
+        if (typeof showToast === 'function') {
+            showToast('页图识别失败，已继续使用文本上下文');
+        }
+    }
+}
+
+function setPdfWorkerSource(source = 'local') {
+    if (!window.pdfjsLib?.GlobalWorkerOptions) return;
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = source === 'cdn'
+        ? `${PDFJS_CDN_BASE}/pdf.worker.min.js`
+        : `${PDFJS_LOCAL_BASE}/pdf.worker.min.js`;
+    window.__lifeosPdfWorkerSource = source;
+}
+
+async function ensurePdfLib() {
+    if (window.pdfjsLib?.getDocument) {
+        setPdfWorkerSource(window.__lifeosPdfLibSource === 'cdn' ? 'cdn' : 'local');
+        return true;
+    }
+
+    try {
+        await loadScriptOnce(`${PDFJS_LOCAL_BASE}/pdf.min.js`);
+    } catch (e) {
+        console.warn('PDF 本地库加载失败:', e);
+    }
+    if (window.pdfjsLib?.getDocument) {
+        window.__lifeosPdfLibSource = 'local';
+        setPdfWorkerSource('local');
+        return true;
+    }
+
+    try {
+        await loadScriptOnce(`${PDFJS_CDN_BASE}/pdf.min.js`);
+    } catch (e) {
+        console.warn('PDF CDN 加载失败:', e);
+    }
+    if (window.pdfjsLib?.getDocument) {
+        window.__lifeosPdfLibSource = 'cdn';
+        setPdfWorkerSource('cdn');
+        return true;
+    }
+
+    return false;
+}
+
+async function loadPdfDocument(arrayBuffer) {
+    if (!window.pdfjsLib?.getDocument) {
+        throw new Error('PDF 解析库未加载');
+    }
+
+    const loadWithWorker = async (workerSource) => {
+        setPdfWorkerSource(workerSource);
+        const resourceSource = await resolvePdfResourceSource(workerSource);
+        if (resourceSource !== workerSource) {
+            console.info(`PDF ${workerSource} 资源不完整，切换到 ${resourceSource} cmaps/standard_fonts 以改进中文和公式提取`);
+        }
+        const loadingTask = window.pdfjsLib.getDocument(buildPdfDocumentOptions(arrayBuffer, workerSource, resourceSource));
+        return loadingTask.promise;
+    };
+
+    try {
+        return await loadWithWorker(window.__lifeosPdfLibSource === 'cdn' ? 'cdn' : 'local');
+    } catch (error) {
+        if (window.__lifeosPdfWorkerSource !== 'cdn') {
+            console.warn('PDF 本地 worker 加载失败，尝试 CDN worker:', error);
+            return loadWithWorker('cdn');
+        }
+        throw error;
+    }
+}
+
+function normalizePdfTextFragment(text) {
+    const raw = text || '';
+    const normalized = typeof raw.normalize === 'function' ? raw.normalize('NFKC') : raw;
+    return normalized
+        .replace(/\u00a0/g, ' ')
+        .replace(/\u00ad/g, '')
+        .replace(/ﬀ/g, 'ff')
+        .replace(/ﬁ/g, 'fi')
+        .replace(/ﬂ/g, 'fl')
+        .replace(/ﬃ/g, 'ffi')
+        .replace(/ﬄ/g, 'ffl')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+const PDF_MATH_SYMBOL_RE = /[=<>+\-*/^_~±×÷·⋅•∙≈≠≤≥∑∏∫∞∂∇√∈∉⊂⊆⊃⊇∩∪∀∃→←⇒⇔↦⟨⟩|]/;
+const PDF_GREEK_SYMBOL_RE = /[α-ωΑ-Ωϵϕλμσπθρτδβηγκχψξζν]/;
+const PDF_SYMBOLIC_FONT_RE = /(symbol|wingdings|math|cmex|cmsy|cmmi|cmr|mt\s*extra|zapf)/i;
+const PDF_REPLACEMENT_GLYPH_RE = /[□�]/g;
+const PDF_SUSPICIOUS_DINGBAT_RE = /[♥♦♣♠▲△▼▽◆◇■□●○◎◉◌◍◐◑◒◓▢▣▤▥▦▧▨▩▫▭▮▯☐☑]/g;
+
+function cleanPdfFormulaText(text) {
+    return (text || '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, '$1$2')
+        .trim();
+}
+
+function analyzePdfTextContent(textContent) {
+    const merged = (textContent?.items || [])
+        .map(item => normalizePdfTextFragment(item?.str || ''))
+        .join(' ');
+    const metrics = analyzePdfPlainText(merged);
+    const symbolicFontCount = (textContent?.items || []).filter(item => PDF_SYMBOLIC_FONT_RE.test(item?.fontName || '')).length;
+    return {
+        ...metrics,
+        symbolicFontCount
+    };
+}
+
+function shouldRetryPdfTextContent(metrics) {
+    if (!metrics || metrics.visibleLength === 0) return true;
+    const replacementRatio = metrics.replacementCount / metrics.visibleLength;
+    const dingbatRatio = metrics.dingbatCount / metrics.visibleLength;
+    return replacementRatio >= 0.01 || dingbatRatio >= 0.025;
+}
+
+function shouldAttemptPdfOcr(metrics) {
+    if (!metrics || metrics.visibleLength === 0) return true;
+    const replacementRatio = metrics.replacementCount / metrics.visibleLength;
+    const dingbatRatio = metrics.dingbatCount / metrics.visibleLength;
+    return replacementRatio >= 0.008 ||
+        dingbatRatio >= 0.018 ||
+        (metrics.visibleLength >= 40 && metrics.readableRatio < 0.55 && metrics.mathCount < Math.max(8, metrics.visibleLength * 0.25)) ||
+        (Number(metrics.symbolicFontCount) || 0) >= 10;
+}
+
+async function getPdfPageTextContent(page) {
+    const primary = await page.getTextContent({
+        normalizeWhitespace: false,
+        disableCombineTextItems: true
+    });
+    const primaryMetrics = analyzePdfTextContent(primary);
+    if (!shouldRetryPdfTextContent(primaryMetrics)) {
+        return primary;
+    }
+
+    const fallback = await page.getTextContent({
+        normalizeWhitespace: false,
+        disableCombineTextItems: false
+    });
+    const fallbackMetrics = analyzePdfTextContent(fallback);
+    return fallbackMetrics.score > primaryMetrics.score ? fallback : primary;
+}
+
+function isLikelyPdfMatrixFragment(text) {
+    const normalized = cleanPdfFormulaText(text).replace(/\n+/g, ' ').trim();
+    if (!normalized || normalized.length > 80) return false;
+    if (!/[|()[\]{}⟨⟩]/.test(normalized)) return false;
+    if (!/[A-Za-z0-9α-ωΑ-Ω]/.test(normalized) && !/[:.⋮⋯…]/.test(normalized)) return false;
+    return /^[\sA-Za-z0-9α-ωΑ-Ω()[\]{}|⟨⟩<>.,:;=+*/^_~'"`‖∥⋮⋯…-]+$/.test(normalized);
+}
+
+function isLikelyPdfFormulaText(text) {
+    const normalized = cleanPdfFormulaText(text);
+    if (!normalized || normalized.length < 2) return false;
+    if (/^#+\s/.test(normalized)) return false;
+    if (isLikelyPdfMatrixFragment(normalized)) return true;
+
+    const mathMatches = normalized.match(PDF_MATH_SYMBOL_RE) || [];
+    const greekMatches = normalized.match(PDF_GREEK_SYMBOL_RE) || [];
+    const latinMatches = normalized.match(/[A-Za-z]/g) || [];
+    const digitMatches = normalized.match(/\d/g) || [];
+    const visibleLength = normalized.replace(/\s+/g, '').length || normalized.length;
+    const mathDensity = (mathMatches.length + greekMatches.length) / Math.max(1, visibleLength);
+
+    if (mathMatches.length >= 2 && /[A-Za-z0-9]/.test(normalized) && normalized.length <= 180) {
+        return true;
+    }
+    if (greekMatches.length >= 1 && /[=<>+\-*/^_]/.test(normalized) && normalized.length <= 180) {
+        return true;
+    }
+    if (/[=≈≠≤≥]/.test(normalized) && (latinMatches.length + digitMatches.length) >= 2 && normalized.length <= 200) {
+        return true;
+    }
+    if (mathDensity >= 0.08 && (latinMatches.length + digitMatches.length) >= 2 && normalized.length <= 160) {
+        return true;
+    }
+    if (/^[\sA-Za-z0-9=<>+\-*/^_~±×÷·⋅•∙≈≠≤≥∑∏∫∞∂∇√∈∉⊂⊆⊃⊇∩∪∀∃→←⇒⇔↦⟨⟩|()[\]{}.,:;]+$/.test(normalized) &&
+        mathMatches.length >= 2 &&
+        normalized.length <= 140) {
+        return true;
+    }
+    return false;
+}
+
+function isLikelyStandalonePdfFormulaLine(line, pageWidth) {
+    if (!line) return false;
+    const normalized = cleanPdfFormulaText(line.text);
+    const isMatrixFragment = isLikelyPdfMatrixFragment(normalized);
+    const hasSymbolicFont = !!line.hasSymbolicFont;
+    if (!isMatrixFragment && !isLikelyPdfFormulaText(normalized)) return false;
+    if (!normalized || normalized.length > 220) return false;
+    if (/[,.;:!?。！？]$/.test(normalized) && !isMatrixFragment && !hasSymbolicFont && !/[=≈≠≤≥∑∏∫∞∂∇√]/.test(normalized)) {
+        return false;
+    }
+    if (Number.isFinite(pageWidth) && pageWidth > 0) {
+        const width = Number(line.width) || 0;
+        if (width >= pageWidth * 0.92 && !isMatrixFragment && !hasSymbolicFont && !/[=≈≠≤≥∑∏∫∞∂∇√]/.test(normalized)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function cleanPdfLineText(text, isFormula = false) {
+    if (isFormula) {
+        return cleanPdfFormulaText(text);
+    }
+    return (text || '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+([,.;:!?%])/g, '$1')
+        .replace(/([([{])\s+/g, '$1')
+        .replace(/\s+([)\]}])/g, '$1')
+        .replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, '$1$2')
+        .trim();
+}
+
+function cleanPdfParagraphText(text) {
+    return cleanPdfLineText((text || '').replace(/\s{2,}/g, ' '));
+}
+
+function isCjkCharacter(char) {
+    return /[\u3400-\u9fff\uf900-\ufaff]/.test(char || '');
+}
+
+function shouldInsertPdfSpace(prevText, nextText, gap, avgCharWidth) {
+    const leftChar = (prevText || '').slice(-1);
+    const rightChar = (nextText || '').charAt(0);
+    if (!leftChar || !rightChar) return false;
+    if (!Number.isFinite(gap) || gap <= 0) return false;
+    if (/\s/.test(leftChar) || /\s/.test(rightChar)) return false;
+    if (leftChar === '-' || leftChar === '‐') return false;
+    if (/[([{/"'“‘]/.test(leftChar)) return false;
+    if (/[.,;:!?%)\]}>"'”’]/.test(rightChar)) return false;
+    if (isCjkCharacter(leftChar) || isCjkCharacter(rightChar)) return false;
+    return gap > Math.max(0.5, avgCharWidth * 0.22);
+}
+
+function mergePdfParagraphText(prevText, nextText) {
+    const left = (prevText || '').trimEnd();
+    const right = (nextText || '').trim();
+    if (!left) return right;
+    if (!right) return left;
+
+    if (/-$/.test(left) && /^[A-Za-z]/.test(right)) {
+        return left.slice(0, -1) + right;
+    }
+
+    const leftChar = left.slice(-1);
+    const rightChar = right.charAt(0);
+    if (
+        isCjkCharacter(leftChar) ||
+        isCjkCharacter(rightChar) ||
+        /[([{/"'“‘]/.test(leftChar) ||
+        /[.,;:!?%)\]}>"'”’]/.test(rightChar)
+    ) {
+        return left + right;
+    }
+
+    return `${left} ${right}`;
+}
+
+function computePdfMedian(values) {
+    const nums = (values || []).filter(v => Number.isFinite(v)).sort((a, b) => a - b);
+    if (nums.length === 0) return 0;
+    const mid = Math.floor(nums.length / 2);
+    return nums.length % 2 === 0
+        ? (nums[mid - 1] + nums[mid]) / 2
+        : nums[mid];
+}
+
+function normalizePdfHeadingLabel(text) {
+    return cleanPdfParagraphText((text || '').replace(/^#+\s*/, ''));
+}
+
+function isLikelyPdfHeading(text) {
+    const normalized = normalizePdfHeadingLabel(text);
+    if (!normalized || normalized.length > 120) return false;
+
+    const keywordHeading = /^(abstract|摘要|introduction|background|related work|method|methods|materials and methods|experiment(?:al setup)?|experiments|results?|discussion|conclusions?|references|acknowledg?ments?|keywords?|关键词|关键字|致谢|附录|appendix)\b/i;
+    if (keywordHeading.test(normalized)) {
+        return normalized.length <= 80;
+    }
+    if (/^(?:\d+(?:\.\d+){0,3}|[IVX]+)\s+[A-Za-z\u4e00-\u9fa5]/i.test(normalized)) {
+        return true;
+    }
+    if (/^(?:第[一二三四五六七八九十百零两\d]+[章节部分]|附录)\s*/.test(normalized)) {
+        return true;
+    }
+    return false;
+}
+
+function getPdfHeadingDepth(text) {
+    const normalized = normalizePdfHeadingLabel(text);
+    const numbered = normalized.match(/^(\d+(?:\.\d+){0,3})\s+/);
+    if (numbered) {
+        return Math.max(0, numbered[1].split('.').length - 1);
+    }
+    return 0;
+}
+
+function buildPdfLineEntries(items) {
+    const rawEntries = (items || [])
+        .map(item => {
+            const text = normalizePdfTextFragment(item?.str || '');
+            if (!text) return null;
+            const transform = Array.isArray(item?.transform) ? item.transform : [];
+            const x = Number(transform[4] || 0);
+            const y = Number(transform[5] || 0);
+            const width = Math.abs(Number(item?.width || 0));
+            const height = Math.abs(Number(item?.height || transform[0] || transform[3] || 0)) || 8;
+            const estimatedWidth = width > 0 ? width : text.length * Math.max(0.8, height * 0.42);
+            const endX = x + estimatedWidth;
+            return {
+                text,
+                x,
+                y,
+                width,
+                height,
+                endX,
+                hasEOL: !!item?.hasEOL,
+                fontName: item?.fontName || '',
+                isSymbolicFont: PDF_SYMBOLIC_FONT_RE.test(item?.fontName || '')
+            };
+        })
+        .filter(Boolean);
+
+    const medianEntryHeight = computePdfMedian(rawEntries.map(entry => entry.height)) || 8;
+
+    const entries = rawEntries
+        .filter(Boolean)
+        .sort((a, b) => {
+            if (Math.abs(b.y - a.y) > 0.5) return b.y - a.y;
+            return a.x - b.x;
+        });
+
+    const grouped = [];
+    entries.forEach(entry => {
+        const tolerance = Math.max(3, Math.min(6.5, Math.max(entry.height * 0.85, medianEntryHeight * 0.72)));
+        const current = grouped[grouped.length - 1];
+        if (!current || Math.abs(current.y - entry.y) > Math.max(current.tolerance, tolerance)) {
+            grouped.push({
+                y: entry.y,
+                tolerance,
+                items: [entry]
+            });
+            return;
+        }
+        current.items.push(entry);
+        current.tolerance = Math.max(current.tolerance, tolerance);
+    });
+
+    const mergedGroups = [];
+    grouped.forEach(group => {
+        const currentStartX = Math.min(...group.items.map(item => item.x));
+        const currentEndX = Math.max(...group.items.map(item => item.endX));
+        const currentText = group.items.map(item => item.text).join(' ');
+        const currentHasSmallGlyph = group.items.some(item => item.height <= medianEntryHeight * 0.82);
+        const currentHasSymbolicFont = group.items.some(item => item.isSymbolicFont);
+
+        if (mergedGroups.length === 0) {
+            mergedGroups.push({ ...group });
+            return;
+        }
+
+        const prev = mergedGroups[mergedGroups.length - 1];
+        const prevStartX = Math.min(...prev.items.map(item => item.x));
+        const prevEndX = Math.max(...prev.items.map(item => item.endX));
+        const prevText = prev.items.map(item => item.text).join(' ');
+        const prevHasSmallGlyph = prev.items.some(item => item.height <= medianEntryHeight * 0.82);
+        const prevHasSymbolicFont = prev.items.some(item => item.isSymbolicFont);
+        const verticalGap = Math.abs(prev.y - group.y);
+        const horizontalGap = Math.max(prevStartX, currentStartX) - Math.min(prevEndX, currentEndX);
+        const formulaish = isLikelyPdfFormulaText(prevText) || isLikelyPdfFormulaText(currentText);
+
+        if (
+            verticalGap <= Math.max(3.4, Math.min(7, medianEntryHeight * 0.92)) &&
+            horizontalGap <= Math.max(4, medianEntryHeight * 1.2) &&
+            (formulaish || prevHasSmallGlyph || currentHasSmallGlyph || prevHasSymbolicFont || currentHasSymbolicFont)
+        ) {
+            prev.items.push(...group.items);
+            prev.y = Math.max(prev.y, group.y);
+            prev.tolerance = Math.max(prev.tolerance, group.tolerance);
+            return;
+        }
+
+        mergedGroups.push({ ...group });
+    });
+
+    return mergedGroups
+        .map(group => {
+            const lineItems = group.items.sort((a, b) => a.x - b.x);
+            let text = '';
+            let prev = null;
+            lineItems.forEach(item => {
+                if (!prev) {
+                    text = item.text;
+                    prev = item;
+                    return;
+                }
+                const prevAvg = prev.width > 0 ? prev.width / Math.max(1, prev.text.length) : 0;
+                const nextAvg = item.width > 0 ? item.width / Math.max(1, item.text.length) : 0;
+                const avgCharWidth = Math.max(1.2, prevAvg || nextAvg || group.tolerance);
+                const gap = item.x - prev.endX;
+                if (shouldInsertPdfSpace(text, item.text, gap, avgCharWidth)) {
+                    text += ' ';
+                }
+                text += item.text;
+                prev = item;
+            });
+            const startX = Math.min(...lineItems.map(item => item.x));
+            const endX = Math.max(...lineItems.map(item => item.endX));
+            const rawText = text;
+            const hasSymbolicFont = lineItems.some(item => item.isSymbolicFont);
+            const isFormula = hasSymbolicFont || isLikelyPdfFormulaText(rawText);
+            return {
+                text: cleanPdfLineText(rawText, isFormula),
+                rawText,
+                y: group.y,
+                startX,
+                endX,
+                width: Math.max(0, endX - startX),
+                isFormula,
+                hasSymbolicFont
+            };
+        })
+        .filter(line => !!line.text);
+}
+
+function reorderPdfLinesByColumns(lines, pageWidth) {
+    const ordered = (lines || []).slice().sort((a, b) => {
+        if (Math.abs(b.y - a.y) > 0.5) return b.y - a.y;
+        return a.startX - b.startX;
+    });
+    if (!Number.isFinite(pageWidth) || pageWidth <= 0 || ordered.length < 8) {
+        return ordered;
+    }
+
+    const candidates = ordered.filter(line => !line.isFormula && line.width > 0 && line.width < pageWidth * 0.78 && line.text.length >= 8);
+    if (candidates.length < 8) return ordered;
+
+    const starts = candidates.map(line => line.startX).sort((a, b) => a - b);
+    let splitX = null;
+    let biggestGap = 0;
+    for (let i = 1; i < starts.length; i++) {
+        const gap = starts[i] - starts[i - 1];
+        if (gap > biggestGap) {
+            biggestGap = gap;
+            splitX = starts[i - 1] + gap / 2;
+        }
+    }
+    if (!Number.isFinite(splitX) || biggestGap < pageWidth * 0.12) return ordered;
+
+    const leftCount = candidates.filter(line => line.startX < splitX).length;
+    const rightCount = candidates.filter(line => line.startX >= splitX).length;
+    if (leftCount < 4 || rightCount < 4) return ordered;
+
+    const segments = [];
+    let buffer = [];
+    const flushBuffer = () => {
+        if (buffer.length > 0) {
+            segments.push({ type: 'column', lines: buffer });
+            buffer = [];
+        }
+    };
+
+    ordered.forEach(line => {
+        const isFullWidth = line.width >= pageWidth * 0.72 || (line.startX < splitX && line.endX > splitX + pageWidth * 0.05);
+        if (isFullWidth) {
+            flushBuffer();
+            segments.push({ type: 'full', line });
+        } else {
+            buffer.push(line);
+        }
+    });
+    flushBuffer();
+
+    const reordered = [];
+    segments.forEach(segment => {
+        if (segment.type === 'full') {
+            reordered.push(segment.line);
+            return;
+        }
+        const left = segment.lines.filter(line => line.startX < splitX).sort((a, b) => {
+            if (Math.abs(b.y - a.y) > 0.5) return b.y - a.y;
+            return a.startX - b.startX;
+        });
+        const right = segment.lines.filter(line => line.startX >= splitX).sort((a, b) => {
+            if (Math.abs(b.y - a.y) > 0.5) return b.y - a.y;
+            return a.startX - b.startX;
+        });
+        reordered.push(...left, ...right);
+    });
+
+    return reordered.length === ordered.length ? reordered : ordered;
+}
+
+function extractPdfParagraphsFromPage(textContent, pageNumber, pageWidth) {
+    const orderedLines = reorderPdfLinesByColumns(buildPdfLineEntries(textContent?.items || []), pageWidth);
+    const gaps = [];
+    for (let i = 1; i < orderedLines.length; i++) {
+        const gap = orderedLines[i - 1].y - orderedLines[i].y;
+        if (Number.isFinite(gap) && gap > 0 && gap < 200) {
+            gaps.push(gap);
+        }
+    }
+    const medianGap = computePdfMedian(gaps) || 12;
+    const paragraphs = [];
+    let currentParagraph = '';
+    let currentParagraphIsFormula = false;
+
+    const pushCurrentParagraph = () => {
+        const normalized = currentParagraphIsFormula
+            ? cleanPdfFormulaText(currentParagraph)
+            : cleanPdfParagraphText(currentParagraph);
+        if (normalized) paragraphs.push(normalized);
+        currentParagraph = '';
+        currentParagraphIsFormula = false;
+    };
+
+    orderedLines.forEach((line, index) => {
+        const isFormulaLine = !!line.isFormula;
+        const standaloneFormulaLine = isLikelyStandalonePdfFormulaLine(line, pageWidth);
+        const text = isFormulaLine
+            ? cleanPdfFormulaText(line.text)
+            : cleanPdfParagraphText(line.text);
+        if (!text) return;
+
+        if (isLikelyPdfHeading(text)) {
+            pushCurrentParagraph();
+            paragraphs.push(`# ${normalizePdfHeadingLabel(text)}`);
+            return;
+        }
+
+        if (standaloneFormulaLine) {
+            if (currentParagraph && currentParagraphIsFormula) {
+                currentParagraph = `${currentParagraph}\n${text}`;
+                return;
+            }
+            pushCurrentParagraph();
+            currentParagraph = text;
+            currentParagraphIsFormula = true;
+            return;
+        }
+
+        if (!currentParagraph) {
+            currentParagraph = text;
+            currentParagraphIsFormula = isFormulaLine;
+            return;
+        }
+
+        const prevLine = orderedLines[index - 1];
+        const verticalGap = prevLine ? (prevLine.y - line.y) : medianGap;
+        if (currentParagraphIsFormula !== isFormulaLine && (currentParagraphIsFormula || isFormulaLine)) {
+            pushCurrentParagraph();
+            currentParagraph = text;
+            currentParagraphIsFormula = isFormulaLine;
+            return;
+        }
+        if (currentParagraphIsFormula && isFormulaLine) {
+            currentParagraph = `${currentParagraph}\n${text}`;
+            return;
+        }
+        if (Number.isFinite(verticalGap) && verticalGap > medianGap * 1.5) {
+            pushCurrentParagraph();
+            currentParagraph = text;
+            currentParagraphIsFormula = isFormulaLine;
+            return;
+        }
+
+        currentParagraph = mergePdfParagraphText(currentParagraph, text);
+    });
+
+    pushCurrentParagraph();
+
+    return {
+        pageNumber,
+        paragraphs,
+        textLength: paragraphs.join('').length
+    };
+}
+
+async function resolvePdfOutlinePageIndex(pdf, outlineItem) {
+    let destination = outlineItem?.dest || null;
+    if (!destination) return null;
+
+    try {
+        if (typeof destination === 'string') {
+            destination = await pdf.getDestination(destination);
+        }
+        if (!Array.isArray(destination) || !destination[0]) return null;
+        if (typeof destination[0] === 'number' && Number.isFinite(destination[0])) {
+            return destination[0] + 1;
+        }
+        const zeroBasedPage = await pdf.getPageIndex(destination[0]);
+        return Number.isFinite(zeroBasedPage) ? zeroBasedPage + 1 : null;
+    } catch (error) {
+        console.warn('PDF outline 目标解析失败:', error);
+        return null;
+    }
+}
+
+async function flattenPdfOutline(pdf, items, pageStartParagraphs, paragraphCount, depth = 0, output = []) {
+    for (const item of items || []) {
+        const label = cleanPdfParagraphText(item?.title || '');
+        const pageIndex = await resolvePdfOutlinePageIndex(pdf, item);
+        if (label) {
+            output.push({
+                label,
+                depth,
+                index: findPdfParagraphIndexForPage(pageStartParagraphs, pageIndex, paragraphCount),
+                pageIndex: pageIndex || null
+            });
+        }
+        if (Array.isArray(item?.items) && item.items.length > 0) {
+            await flattenPdfOutline(pdf, item.items, pageStartParagraphs, paragraphCount, depth + 1, output);
+        }
+    }
+    return output;
+}
+
+function generatePdfFallbackToc(paragraphs, paragraphPageMap) {
+    const seen = new Set();
+    const toc = [];
+
+    paragraphs.forEach((paragraph, index) => {
+        const label = normalizePdfHeadingLabel(paragraph);
+        if (!isLikelyPdfHeading(label)) return;
+        const key = normalizeTocTitle(label);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        toc.push({
+            label,
+            depth: getPdfHeadingDepth(label),
+            index,
+            pageIndex: Number(paragraphPageMap[index]) || null
+        });
+    });
+
+    return toc;
+}
+
+async function parsePdfFile(file) {
+    const arrayBuffer = await readFileAsArrayBuffer(file);
+    const sourceDataUrl = await readFileAsDataUrl(file);
+    const pdf = await loadPdfDocument(arrayBuffer);
+    const pageCount = Number(pdf?.numPages) || 0;
+    if (pageCount <= 0) {
+        throw new Error('PDF 页数无效');
+    }
+
+    let title = '';
+    try {
+        const metadata = await pdf.getMetadata();
+        title = cleanPdfParagraphText(metadata?.info?.Title || metadata?.metadata?.get?.('dc:title') || '');
+    } catch (e) {
+        title = '';
+    }
+
+    const paragraphs = [];
+    const paragraphPageMap = [];
+    const pageStartParagraphs = new Array(pageCount).fill(null);
+    let totalTextLength = 0;
+    let ocrUsedPages = 0;
+    let ocrFailedPages = 0;
+    let announcedOcrFallback = false;
+
+    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1 });
+        const textContent = await getPdfPageTextContent(page);
+        const extractedPageData = extractPdfParagraphsFromPage(textContent, pageNumber, viewport?.width || 0);
+        let pageData = extractedPageData;
+        const extractedMetrics = analyzePdfPlainText(extractedPageData.paragraphs.join('\n\n'));
+
+        if (shouldAttemptPdfOcr(extractedMetrics)) {
+            try {
+                if (!announcedOcrFallback && typeof showToast === 'function') {
+                    showToast('检测到 PDF 字体映射异常，正在对部分页面启用 OCR 修复，首次会更慢...');
+                    announcedOcrFallback = true;
+                }
+                const ocrText = await ocrPdfPageText(page, pageNumber);
+                const ocrPageData = extractPdfParagraphsFromOcrText(ocrText, pageNumber);
+                const ocrMetrics = analyzePdfPlainText(ocrPageData.paragraphs.join('\n\n'));
+                const extractedBadness = extractedMetrics.replacementCount + extractedMetrics.dingbatCount;
+                const ocrBadness = ocrMetrics.replacementCount + ocrMetrics.dingbatCount;
+                const ocrLooksBetter = ocrMetrics.visibleLength > 0 && (
+                    ocrMetrics.score > extractedMetrics.score + 6 ||
+                    (extractedBadness > ocrBadness && ocrMetrics.visibleLength >= Math.max(30, extractedMetrics.visibleLength * 0.6))
+                );
+
+                if (ocrLooksBetter) {
+                    pageData = ocrPageData;
+                    ocrUsedPages += 1;
+                }
+            } catch (error) {
+                ocrFailedPages += 1;
+                console.warn(`PDF 第 ${pageNumber} 页 OCR 修复失败，保留原始抽取结果:`, error);
+            }
+        }
+
+        totalTextLength += pageData.textLength;
+
+        if (pageData.paragraphs.length > 0) {
+            pageStartParagraphs[pageNumber - 1] = paragraphs.length;
+            pageData.paragraphs.forEach(paragraph => {
+                paragraphs.push(paragraph);
+                paragraphPageMap.push(pageNumber);
+            });
+        }
+
+        if (typeof page.cleanup === 'function') {
+            page.cleanup();
+        }
+    }
+
+    const averageCharsPerPage = pageCount > 0 ? totalTextLength / pageCount : 0;
+    if (paragraphs.length === 0 || totalTextLength < Math.max(100, pageCount * 25) || averageCharsPerPage < 30) {
+        throw new Error('该版本仅支持可提取文本的 PDF，当前文件更像扫描件或图片型 PDF');
+    }
+
+    let toc = [];
+    try {
+        const outline = await pdf.getOutline();
+        if (Array.isArray(outline) && outline.length > 0) {
+            toc = await flattenPdfOutline(pdf, outline, pageStartParagraphs, paragraphs.length);
+        }
+    } catch (e) {
+        console.warn('PDF outline 读取失败:', e);
+    }
+
+    if (!toc || toc.length === 0) {
+        toc = generatePdfFallbackToc(paragraphs, paragraphPageMap);
+    }
+
+    if (ocrUsedPages > 0 && typeof showToast === 'function') {
+        showToast(`PDF 导入完成，其中 ${ocrUsedPages} 页使用 OCR 修复了异常文本`);
+    } else if (ocrFailedPages > 0 && typeof showToast === 'function') {
+        showToast('PDF 中部分异常页面未能完成 OCR 修复，个别符号可能仍不准确');
+    }
+
+    return {
+        title: title || file.name.replace(/\.[^.]+$/, ''),
+        content: paragraphs.join('\n\n'),
+        toc: toc || [],
+        pageCount,
+        paragraphPageMap,
+        pageStartParagraphs,
+        ocrUsedPages,
+        sourceDataUrl
+    };
 }
 
 async function parseEpubFile(file) {
@@ -16926,7 +20404,17 @@ function renderParagraphWithLinks(text) {
         const safeText = escapeHtml(link.text);
         return `<a class="reader-footnote-link" data-href="${safeHref}" onclick="handleReaderLinkClick(this); return false;">${safeText}</a>`;
     });
+    if (/(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|(?<!\$)\$(?!\$)(?:[^$\\]|\\.)+?\$(?!\$)|\\\([\s\S]*?\\\))/.test(html)) {
+        html = renderLatex(html);
+    }
     return html;
+}
+
+function isLikelyPdfFormulaParagraph(text) {
+    const raw = text || '';
+    if (!raw.trim()) return false;
+    if (raw.includes('\n')) return true;
+    return isLikelyStandalonePdfFormulaLine({ text: raw, width: 0 }, 0);
 }
 
 // 处理阅读器内脚注链接点击
@@ -17015,6 +20503,9 @@ function renderReaderContent() {
                 if (p.startsWith('# ')) {
                     const title = escapeHtml(p.substring(2));
                     return `<div data-paragraph="${index}" class="reader-chapter-heading">${title}</div>`;
+                }
+                if (currentBook.format === 'pdf' && isLikelyPdfFormulaParagraph(p)) {
+                    return `<div data-paragraph="${index}" class="reader-pdf-formula" style="margin:1.1em 0; white-space:pre-wrap; line-height:1.7; font-family:'Cambria Math','STIX Two Text','Times New Roman',serif;">${renderParagraphWithLinks(p)}</div>`;
                 }
                 return `<p data-paragraph="${index}" style="margin-bottom:1em;">${renderParagraphWithLinks(p)}</p>`;
             }).join('');
@@ -18941,7 +22432,11 @@ async function addNoteToSelection() {
 
 function buildReaderLocationLabel(payload) {
     const parts = [];
-    if (payload?.pageIndex) parts.push(`第 ${payload.pageIndex} 页`);
+    const mappedPdfPage = getPdfPageIndexForParagraph(payload?.book, payload?.paragraphIndex);
+    const pageIndex = Number.isFinite(Number(payload?.pageIndex))
+        ? Number(payload.pageIndex)
+        : mappedPdfPage;
+    if (pageIndex) parts.push(`第 ${pageIndex} 页`);
     if (payload?.paragraphIndex !== null && payload?.paragraphIndex !== undefined) {
         parts.push(`段落 ${Number(payload.paragraphIndex) + 1}`);
     }
@@ -18980,15 +22475,30 @@ async function buildReaderSharePayload(sourceType, rawData = {}) {
             updatedAt: Date.now()
         });
 
+    const paragraphIndex = locator?.paragraphIndex ?? (Number.isFinite(fallbackParagraphIndex) ? fallbackParagraphIndex : null);
+    let pageIndex = null;
+    if (isPdfBook(book)) {
+        const explicitPageIndex = Number(rawData.pageIndex);
+        pageIndex = Number.isFinite(explicitPageIndex) && explicitPageIndex > 0
+            ? explicitPageIndex
+            : getPdfPageIndexForParagraph(book, paragraphIndex);
+    } else {
+        const explicitPageIndex = Number(rawData.pageIndex);
+        const locatorPageIndex = Number(locator?.pageIndex);
+        pageIndex = Number.isFinite(explicitPageIndex) && explicitPageIndex > 0
+            ? explicitPageIndex
+            : (Number.isFinite(locatorPageIndex) && locatorPageIndex > 0 ? locatorPageIndex : null);
+    }
+
     const payload = {
         source: 'reader',
         sourceType,
         bookId: book?.id ?? rawData.bookId ?? currentBook?.id ?? null,
         bookTitle: book?.title || rawData.bookTitle || currentBook?.title || '未知书籍',
         chapterId: locator?.chapterId || null,
-        pageIndex: locator?.pageIndex ?? (Number.isFinite(Number(rawData.pageIndex)) ? Number(rawData.pageIndex) : null),
+        pageIndex,
         locator: locator?.locator || null,
-        paragraphIndex: locator?.paragraphIndex ?? (Number.isFinite(fallbackParagraphIndex) ? fallbackParagraphIndex : null),
+        paragraphIndex,
         excerpt: (rawData.excerpt || rawData.selectionText || rawData.content || '').trim(),
         noteId: rawData.noteId ?? rawData.id ?? null,
         userNote: rawData.userNote || null,
@@ -19442,16 +22952,22 @@ function updateReaderProgressModal() {
     const label = document.getElementById('reader-progress-modal-value');
     if (label) label.textContent = `${percentage}%`;
     const info = document.getElementById('reader-progress-info');
-    if (info) info.textContent = `当前进度: ${percentage}%`;
+    if (info) {
+        const paragraphIndex = getCurrentVisibleParagraphIndex();
+        const pdfPageIndex = getPdfPageIndexForParagraph(currentBook, paragraphIndex);
+        info.textContent = pdfPageIndex
+            ? `当前进度: ${percentage}% · PDF 第 ${pdfPageIndex} / ${currentBook.pageCount || pdfPageIndex} 页`
+            : `当前进度: ${percentage}%`;
+    }
 }
 
 function buildReaderCatalog() {
     const listEl = document.getElementById('reader-catalog-list');
     if (!listEl || !currentBook) return;
 
-    if ((currentBook.format === 'epub' || currentBook.format === 'md') && Array.isArray(currentBook.toc) && currentBook.toc.length > 0) {
+    if (Array.isArray(currentBook.toc) && currentBook.toc.length > 0) {
         const tocItems = currentBook.toc;
-        const paragraphs = currentBook.content.split('\n').filter(p => p.trim());
+        const paragraphs = getBookParagraphs(currentBook);
         const titleMap = {};
         paragraphs.forEach((p, i) => {
             const line = p.replace(/^#+\s*/, '').trim();
@@ -19462,23 +22978,29 @@ function buildReaderCatalog() {
         });
 
         listEl.innerHTML = tocItems.map(item => {
-            const mappedIndex = Number.isFinite(item.index) ? item.index : null;
+            const mappedIndex = Number.isFinite(item.index)
+                ? item.index
+                : (Number.isFinite(Number(item.pageIndex)) ? getPdfParagraphIndexForPage(currentBook, Number(item.pageIndex)) : null);
             const targetIndex = mappedIndex !== null ? mappedIndex : (titleMap[normalizeTocTitle(item.label)] ?? null);
             const indent = item.depth ? `padding-left:${item.depth * 14}px;` : '';
             const disabled = targetIndex === null ? 'opacity:0.5; cursor:default;' : '';
             const onClick = targetIndex === null
                 ? ''
                 : `onclick="scrollToParagraph(${targetIndex}); closeModal('modal-reader-catalog')"`;
+            const pageLabel = Number.isFinite(Number(item.pageIndex))
+                ? `<div style="font-size:0.74rem; opacity:0.58; margin-top:3px;">第 ${Number(item.pageIndex)} 页</div>`
+                : '';
             return `
                         <div class="mini-card" style="cursor:pointer; margin-bottom:8px; ${indent} ${disabled}" ${onClick}>
                             <div style="font-weight:bold;">${escapeHtml(item.label || '未命名')}</div>
+                            ${pageLabel}
                         </div>
                     `;
         }).join('');
         return;
     }
 
-    const paragraphs = (currentBook.content || '').split('\n').filter(p => p.trim());
+    const paragraphs = getBookParagraphs(currentBook);
     const catalog = [];
 
     const isHeading = (text) => {
@@ -20160,6 +23682,21 @@ async function openReadingRoom(roomId, keepCurrentBook = false) {
         const sessionBtn = document.getElementById('chat-session-btn');
         if (sessionBtn) sessionBtn.style.display = 'none';
 
+        // Set stable chat-state slug for this reading room's character.
+        const _roomCharId = room.characterId;
+        _pendingChatCharacterId = _roomCharId;
+        currentChatCharacterSlug = cachedCharacterPackageSummaries?.find(p => p.characterId === _roomCharId)?.slug || null;
+        if (!currentChatCharacterSlug && getLifeOSAuthToken()) {
+            characterPackageApiFetch('/api/character-packages').then(data => {
+                if (data?.packages) {
+                    cachedCharacterPackageSummaries = data.packages;
+                    if (_pendingChatCharacterId === _roomCharId) {
+                        currentChatCharacterSlug = data.packages.find(p => p.characterId === _roomCharId)?.slug || null;
+                    }
+                }
+            }).catch(() => {});
+        }
+
         // 创建角色的工作副本，使用阅读室的聊天历史和阅读室自己的长期记忆
         currentChatCharacter = {
             ...character,
@@ -20332,7 +23869,7 @@ async function buildReadingRoomContext() {
         // 基于段落提取当前阅读位置附近的内容
         if (currentBook.content) {
             const config = store.readingContextConfig || { paragraphsBefore: 3, paragraphsAfter: 5, maxChars: 3000 };
-            const allParagraphs = currentBook.content.split('\n').filter(p => p.trim());
+            const allParagraphs = getBookParagraphs(currentBook);
             const totalParagraphs = allParagraphs.length;
             const currentIdx = getCurrentVisibleParagraphIndex();
 
@@ -20352,18 +23889,40 @@ async function buildReadingRoomContext() {
             }
 
             const progressPct = totalParagraphs > 1 ? Math.round((currentIdx / (totalParagraphs - 1)) * 100) : 0;
-            context += `- 当前阅读进度: ${progressPct}%（第 ${currentIdx + 1} / ${totalParagraphs} 段）\n\n`;
+            const currentPdfPage = getPdfPageIndexForParagraph(currentBook, currentIdx);
+            const progressDetail = currentPdfPage
+                ? `${progressPct}%（PDF 第 ${currentPdfPage} / ${currentBook.pageCount || currentPdfPage} 页，第 ${currentIdx + 1} / ${totalParagraphs} 段）`
+                : `${progressPct}%（第 ${currentIdx + 1} / ${totalParagraphs} 段）`;
+            context += `- 当前阅读进度: ${progressDetail}\n\n`;
 
             if (collected.length > 0) {
-                context += `## 用户当前正在阅读的内容（第 ${startIdx + 1}~${startIdx + collected.length} 段）\n\n`;
+                const startPage = getPdfPageIndexForParagraph(currentBook, startIdx);
+                const endPage = getPdfPageIndexForParagraph(currentBook, startIdx + collected.length - 1);
+                const pageRangeLabel = startPage
+                    ? (endPage && endPage !== startPage
+                        ? `，PDF 第 ${startPage}~${endPage} 页`
+                        : `，PDF 第 ${startPage} 页`)
+                    : '';
+                context += `## 用户当前正在阅读的内容（第 ${startIdx + 1}~${startIdx + collected.length} 段${pageRangeLabel}）\n\n`;
                 collected.forEach(cp => {
+                    const paragraphPage = getPdfPageIndexForParagraph(currentBook, cp.index);
+                    const pagePrefix = paragraphPage ? `[PDF 第 ${paragraphPage} 页] ` : '';
                     if (cp.isCurrent) {
-                        context += `>>> [用户当前阅读位置] ${cp.text}\n\n`;
+                        context += `>>> [用户当前阅读位置] ${pagePrefix}${cp.text}\n\n`;
                     } else {
-                        context += `${cp.text}\n\n`;
+                        context += `${pagePrefix}${cp.text}\n\n`;
                     }
                 });
                 console.log(`[阅读上下文] 注入 ${collected.length} 个段落 (${totalChars} 字符) - 《${currentBook.title}》`);
+            }
+
+            if (isPdfBook(currentBook)) {
+                const pageForVision = currentPdfPage || getCurrentReaderPdfPageIndex(currentBook);
+                const pageVision = pageForVision ? getReaderVisionCacheEntry(currentBook.id, pageForVision) : null;
+                if (pageVision?.summary) {
+                    context += `## 当前页视觉补充（PDF 第 ${pageForVision} 页）\n`;
+                    context += `${pageVision.summary}\n\n`;
+                }
             }
         }
 
@@ -20863,29 +24422,30 @@ const _emojiObserver = new MutationObserver(mutations => {
 });
 _emojiObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
-console.log('[LifeOS] Emoji→SVG 图标系统已加载');
+console.log('[AZOTH] Emoji→SVG 图标系统已加载');
 
 
 // ==================== Memory Index Management ====================
 
 let miCurrentPage = 1;
-const MI_PAGE_SIZE = 30;
+const MI_PAGE_SIZE = 100; // Load more for grouping
+let miCurrentView = 'level'; // 'level' | 'space' | 'atom'
+let miAllEntries = []; // cached entries for current page
 
 async function loadMemoryIndexPanel() {
     // Load character list for dropdown
     try {
         const resp = await fetch('/api/memory/index/characters', {
-            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('lifeos_auth_token') }
         });
         if (resp.ok) {
             const data = await resp.json();
             const select = document.getElementById('mi-character-select');
-            // Preserve current selection
             const currentVal = select.value;
             select.innerHTML = '<option value="">全部角色</option>';
             for (const ch of data.characters) {
                 const opt = document.createElement('option');
-                opt.value = ch.id;
+                opt.value = ch.id == null ? 'shared' : ch.id;
                 opt.textContent = ch.name + ' (' + ch.count + ')';
                 select.appendChild(opt);
             }
@@ -20895,18 +24455,45 @@ async function loadMemoryIndexPanel() {
         console.warn('[MemoryIndex] Failed to load characters:', e);
     }
 
-    // Load stats
+    miCurrentPage = 1;
+    miLoadStats();
+    loadMemoryIndex();
+}
+
+async function miLoadStats() {
     try {
-        const resp = await fetch('/api/memory/index/stats', {
-            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+        const characterId = document.getElementById('mi-character-select').value;
+        let url = '/api/memory/index/stats';
+        if (characterId) url += '?character_id=' + encodeURIComponent(characterId);
+        const resp = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('lifeos_auth_token') }
         });
         if (resp.ok) {
-            const data = await resp.json();
-            document.getElementById('mi-total-count').textContent = '总计: ' + data.total + ' 条';
-            document.getElementById('mi-avg-imp').textContent = '平均权重: ' + data.avgImportance;
+            const d = await resp.json();
+            document.getElementById('mi-total-count').textContent = d.total;
+            const ge = document.getElementById('mi-group-count');
+            const se = document.getElementById('mi-space-count');
+            const ae = document.getElementById('mi-anchor-count');
+            if (ge) ge.textContent = d.groupCount || 0;
+            if (se) se.textContent = d.spaceCount || 0;
+            if (ae) ae.textContent = d.anchorCount || 0;
         }
     } catch (e) {}
+}
 
+function miSwitchView(view) {
+    miCurrentView = view;
+    document.querySelectorAll('.mi-tab').forEach(btn => {
+        if (btn.dataset.view === view) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    // Show batch bar only in atom mode
+    const batchBar = document.getElementById('mi-batch-bar');
+    if (batchBar) batchBar.style.display = (view === 'atom' && miAllEntries.length > 0) ? 'flex' : 'none';
+    // Reload data: grouped views need all entries, atom mode needs paginated
     miCurrentPage = 1;
     loadMemoryIndex();
 }
@@ -20919,31 +24506,307 @@ async function loadMemoryIndex() {
     list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-secondary);">加载中...</div>';
 
     try {
-        let url = '/api/memory/index?page=' + miCurrentPage + '&limit=' + MI_PAGE_SIZE;
+        // Grouped views load all entries to avoid group truncation across pages
+        const isGrouped = miCurrentView !== 'atom';
+        const limit = isGrouped ? 5000 : MI_PAGE_SIZE;
+        const page = isGrouped ? 1 : miCurrentPage;
+
+        let url = '/api/memory/index?page=' + page + '&limit=' + limit;
         if (characterId) url += '&character_id=' + encodeURIComponent(characterId);
         if (search) url += '&q=' + encodeURIComponent(search);
 
         const resp = await fetch(url, {
-            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('lifeos_auth_token') }
         });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
 
         const data = await resp.json();
-        renderMemoryIndexList(data.entries);
+        miAllEntries = data.entries || [];
 
-        // Pagination
-        document.getElementById('mi-page-info').textContent = data.page + ' / ' + (data.totalPages || 1);
-        document.getElementById('mi-prev').disabled = data.page <= 1;
-        document.getElementById('mi-next').disabled = data.page >= data.totalPages;
+        // Pagination: only show for atom mode
+        const paginationEl = document.getElementById('mi-pagination');
+        if (isGrouped) {
+            if (paginationEl) paginationEl.style.display = 'none';
+        } else {
+            if (paginationEl) paginationEl.style.display = 'flex';
+            const pageInfo = document.getElementById('mi-page-info-text');
+            if (pageInfo) pageInfo.textContent = data.page + ' / ' + (data.totalPages || 1);
+            const prevBtn = document.getElementById('mi-prev');
+            if (prevBtn) prevBtn.disabled = data.page <= 1;
+            const nextBtn = document.getElementById('mi-next');
+            if (nextBtn) nextBtn.disabled = data.page >= data.totalPages;
+        }
 
-        // Show batch bar
-        document.getElementById('mi-batch-bar').style.display = data.entries.length > 0 ? 'flex' : 'none';
-        document.getElementById('mi-select-all').checked = false;
-        miUpdateSelectedCount();
+        // Batch bar only in atom mode
+        const batchBar = document.getElementById('mi-batch-bar');
+        if (batchBar) batchBar.style.display = (miCurrentView === 'atom' && miAllEntries.length > 0) ? 'flex' : 'none';
+
+        miLoadStats();
+        miRenderCurrentView();
     } catch (e) {
         list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--danger, red);">加载失败: ' + e.message + '</div>';
     }
 }
+
+function miRenderCurrentView() {
+    if (miCurrentView === 'atom') {
+        renderMemoryIndexList(miAllEntries);
+    } else if (miCurrentView === 'space') {
+        miRenderBySpace(miAllEntries);
+    } else {
+        miRenderByLevel(miAllEntries);
+    }
+}
+
+// ---- Classification helpers ----
+
+function miGetLevel(e) {
+    // Normalize importance: old data may use 1-5 scale, new data uses 0-1
+    const imp = e.importance || 0;
+    const normImp = imp > 1 ? imp / 5 : imp; // normalize to 0-1
+    if (e.source_type === 'manual_anchor' || e.visibility === 'shared_public_fact' || normImp >= 0.9) return 'L1';
+    if (normImp < 0.3) return 'L3';
+    return 'L2';
+}
+
+function miGetSpaceLabel(e) {
+    const parts = [];
+    if (e.category_name) parts.push(e.category_name);
+    if (e.channel_name) parts.push(e.channel_name);
+    if (e.thread_name) parts.push(e.thread_name);
+    if (parts.length === 0) {
+        if (e.platform === 'discord') return 'Discord (未分类)';
+        return e.platform || 'LifeOS';
+    }
+    return parts.join(' / ');
+}
+
+function miGetSpaceKey(e) {
+    return e.space_key || e.channel_name || e.platform || '_default';
+}
+
+// ---- Group entries into { groupId -> [entries] } ----
+
+function miGroupEntries(entries) {
+    const groups = {};
+    for (const e of entries) {
+        const gid = e.group_id || ('solo_' + e.id);
+        if (!groups[gid]) groups[gid] = [];
+        groups[gid].push(e);
+    }
+    return groups;
+}
+
+// ---- Render: By Level (default) ----
+
+function miRenderByLevel(entries) {
+    const list = document.getElementById('mi-list');
+    if (!entries || entries.length === 0) {
+        list.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-secondary);">暂无记忆索引数据</div>';
+        return;
+    }
+
+    // Classify entries by level
+    const buckets = { L1: [], L2: [], L3: [] };
+    for (const e of entries) {
+        buckets[miGetLevel(e)].push(e);
+    }
+
+    const levelMeta = {
+        L1: { label: '锚点层', desc: '高重要度 / 锚定记忆 / 公共事实', color: 'var(--accent, #4fc3f7)' },
+        L2: { label: '工作层', desc: '常规对话摘要与工作记忆', color: 'var(--text, #fff)' },
+        L3: { label: '碎片层', desc: '低重要度碎片，默认折叠', color: 'var(--text-secondary)' }
+    };
+
+    let html = '';
+    for (const lvl of ['L1', 'L2', 'L3']) {
+        const items = buckets[lvl];
+        if (items.length === 0) continue;
+        const meta = levelMeta[lvl];
+        const collapsed = lvl === 'L3' ? ' mi-collapsed' : '';
+
+        html += '<div class="mi-level-section' + collapsed + '" data-level="' + lvl + '" style="margin-bottom:14px;">';
+        html += '<div class="mi-level-header" onclick="miToggleSection(this)" style="cursor:pointer; padding:8px 10px; border-radius:8px; background:var(--card-bg); border:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">';
+        html += '<div><span style="font-weight:600; color:' + meta.color + ';">' + lvl + ' ' + meta.label + '</span>';
+        html += '<span style="font-size:0.75rem; color:var(--text-secondary); margin-left:8px;">' + meta.desc + '</span></div>';
+        html += '<span style="font-size:0.8rem; color:var(--text-secondary);">' + items.length + ' 条 ▾</span>';
+        html += '</div>';
+        html += '<div class="mi-level-body" style="' + (lvl === 'L3' ? 'display:none;' : '') + 'margin-top:6px; padding-left:6px;">';
+
+        // Group by space inside this level
+        const bySpace = {};
+        for (const e of items) {
+            const sk = miGetSpaceKey(e);
+            if (!bySpace[sk]) bySpace[sk] = [];
+            bySpace[sk].push(e);
+        }
+
+        for (const sk of Object.keys(bySpace)) {
+            const spaceEntries = bySpace[sk];
+            const spaceLabel = miGetSpaceLabel(spaceEntries[0]);
+            const groups = miGroupEntries(spaceEntries);
+            const groupCount = Object.keys(groups).length;
+
+            // Space badges
+            const firstE = spaceEntries[0];
+            let badges = '';
+            if (firstE.mode_tag) badges += '<span class="mi-badge">' + escapeHtml(firstE.mode_tag) + '</span>';
+            if (firstE.visibility) badges += '<span class="mi-badge">' + escapeHtml(firstE.visibility.replace(/_/g, ' ')) + '</span>';
+            badges += '<span class="mi-badge">' + groupCount + ' 组</span>';
+
+            html += '<div class="mi-space-card" style="margin-bottom:10px; border-radius:8px; border:1px solid var(--border); overflow:hidden;">';
+            html += '<div class="mi-space-header" onclick="miToggleSection(this)" style="cursor:pointer; padding:8px 10px; background:var(--bg, #1a1a2e); display:flex; justify-content:space-between; align-items:center;">';
+            html += '<span style="font-size:0.85rem; font-weight:500;">' + escapeHtml(spaceLabel) + '</span>';
+            html += '<div style="display:flex; gap:4px; align-items:center;">' + badges + ' <span style="font-size:0.75rem;">▾</span></div>';
+            html += '</div>';
+            html += '<div class="mi-space-body" style="padding:6px;">';
+
+            html += miRenderGroups(groups);
+
+            html += '</div></div>'; // space-body, space-card
+        }
+
+        html += '</div></div>'; // level-body, level-section
+    }
+
+    list.innerHTML = html;
+}
+
+// ---- Render: By Space ----
+
+function miRenderBySpace(entries) {
+    const list = document.getElementById('mi-list');
+    if (!entries || entries.length === 0) {
+        list.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-secondary);">暂无记忆索引数据</div>';
+        return;
+    }
+
+    const bySpace = {};
+    for (const e of entries) {
+        const sk = miGetSpaceKey(e);
+        if (!bySpace[sk]) bySpace[sk] = [];
+        bySpace[sk].push(e);
+    }
+
+    let html = '';
+    for (const sk of Object.keys(bySpace)) {
+        const spaceEntries = bySpace[sk];
+        const spaceLabel = miGetSpaceLabel(spaceEntries[0]);
+        const groups = miGroupEntries(spaceEntries);
+        const groupCount = Object.keys(groups).length;
+
+        const firstE = spaceEntries[0];
+        let badges = '';
+        if (firstE.mode_tag) badges += '<span class="mi-badge">' + escapeHtml(firstE.mode_tag) + '</span>';
+        if (firstE.visibility) badges += '<span class="mi-badge">' + escapeHtml(firstE.visibility.replace(/_/g, ' ')) + '</span>';
+        badges += '<span class="mi-badge">' + groupCount + ' 组</span>';
+        badges += '<span class="mi-badge">' + spaceEntries.length + ' 条</span>';
+
+        // Latest update time
+        const latest = spaceEntries.reduce((a, b) => (a.created_at || '') > (b.created_at || '') ? a : b);
+        const latestTs = (latest.timestamp || latest.created_at || '').substring(0, 16);
+        if (latestTs) badges += '<span class="mi-badge">' + latestTs + '</span>';
+
+        html += '<div class="mi-space-card" style="margin-bottom:10px; border-radius:8px; border:1px solid var(--border); overflow:hidden;">';
+        html += '<div class="mi-space-header" onclick="miToggleSection(this)" style="cursor:pointer; padding:8px 10px; background:var(--card-bg); display:flex; justify-content:space-between; align-items:center;">';
+        html += '<span style="font-size:0.88rem; font-weight:500;">' + escapeHtml(spaceLabel) + '</span>';
+        html += '<div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">' + badges + ' <span style="font-size:0.75rem;">▾</span></div>';
+        html += '</div>';
+        html += '<div class="mi-space-body" style="padding:6px;">';
+
+        html += miRenderGroups(groups);
+
+        html += '</div></div>';
+    }
+
+    list.innerHTML = html;
+}
+
+// ---- Render group cards (shared by level & space views) ----
+
+function miRenderGroups(groups) {
+    let html = '';
+    for (const gid of Object.keys(groups)) {
+        const atoms = groups[gid];
+        const isSolo = gid.startsWith('solo_');
+        const avgImp = atoms.reduce((s, a) => s + (a.importance || 0), 0) / atoms.length;
+        const impPercent = Math.round(avgImp * 100);
+        const impColor = impPercent >= 60 ? 'var(--accent, #4fc3f7)' : 'var(--text-secondary)';
+
+        // Build preview: concat content, truncate
+        const preview = atoms.map(a => a.content).join(' ').substring(0, 150);
+        const ts = atoms[0].timestamp || atoms[0].created_at || '';
+        const shortTs = ts.length > 16 ? ts.substring(0, 16) : ts;
+        const spaceLabel = miGetSpaceLabel(atoms[0]);
+
+        html += '<div class="mi-group-card" style="margin-bottom:6px; padding:8px 10px; border-radius:6px; background:var(--card-bg); border:1px solid var(--border);">';
+
+        // Group header line
+        html += '<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:6px;">';
+        html += '<div style="flex:1; min-width:0;">';
+        html += '<div style="font-size:0.88rem; line-height:1.4; word-break:break-word;">' + escapeHtml(preview) + (atoms.map(a => a.content).join(' ').length > 150 ? '...' : '') + '</div>';
+        html += '<div style="display:flex; gap:8px; margin-top:4px; font-size:0.73rem; color:var(--text-secondary); flex-wrap:wrap;">';
+        html += '<span style="color:' + impColor + ';">权重 ' + avgImp.toFixed(2) + '</span>';
+        html += '<span>' + shortTs + '</span>';
+        if (!isSolo) html += '<span>' + atoms.length + ' 条原子</span>';
+        html += '</div>';
+        html += '</div>';
+
+        // Actions
+        html += '<div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">';
+        if (!isSolo && atoms.length > 1) {
+            html += '<button onclick="miToggleGroupAtoms(this)" style="background:none; border:none; color:var(--accent, #4fc3f7); cursor:pointer; padding:2px 6px; font-size:0.78rem;" title="展开原子">展开</button>';
+        }
+        if (!isSolo) {
+            html += '<button onclick="miDeleteGroup(\'' + escapeHtml(gid) + '\', this)" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:2px 6px; font-size:1rem;" title="删除整组">×</button>';
+        } else {
+            html += '<button onclick="miDeleteEntry(' + atoms[0].id + ', this)" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:2px 6px; font-size:1rem;" title="删除">×</button>';
+        }
+        html += '</div>';
+        html += '</div>';
+
+        // Expandable atoms (hidden by default)
+        if (!isSolo && atoms.length > 1) {
+            html += '<div class="mi-group-atoms" style="display:none; margin-top:6px; padding-top:6px; border-top:1px solid var(--border);">';
+            for (const a of atoms) {
+                html += '<div class="mi-atom-row" style="display:flex; justify-content:space-between; align-items:flex-start; padding:4px 0; font-size:0.82rem;">';
+                html += '<div style="flex:1; min-width:0; line-height:1.3; word-break:break-word; color:var(--text-secondary);">' + escapeHtml(a.content) + '</div>';
+                html += '<button onclick="miDeleteEntry(' + a.id + ', this)" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:0 4px; font-size:0.9rem; flex-shrink:0;" title="删除单条">×</button>';
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+
+        html += '</div>'; // group-card
+    }
+    return html;
+}
+
+// ---- Toggle helpers ----
+
+function miToggleSection(headerEl) {
+    const body = headerEl.nextElementSibling;
+    if (!body) return;
+    const isHidden = body.style.display === 'none';
+    body.style.display = isHidden ? '' : 'none';
+    // Update arrow
+    const arrow = headerEl.querySelector('span:last-child');
+    if (arrow && (arrow.textContent === '▾' || arrow.textContent === '▸')) {
+        arrow.textContent = isHidden ? '▾' : '▸';
+    }
+}
+
+function miToggleGroupAtoms(btn) {
+    const card = btn.closest('.mi-group-card');
+    if (!card) return;
+    const atomsDiv = card.querySelector('.mi-group-atoms');
+    if (!atomsDiv) return;
+    const isHidden = atomsDiv.style.display === 'none';
+    atomsDiv.style.display = isHidden ? '' : 'none';
+    btn.textContent = isHidden ? '收起' : '展开';
+}
+
+// ---- Atom mode (legacy flat list) ----
 
 function renderMemoryIndexList(entries) {
     const list = document.getElementById('mi-list');
@@ -20954,18 +24817,23 @@ function renderMemoryIndexList(entries) {
 
     list.innerHTML = entries.map(e => {
         const impPercent = Math.round((e.importance || 0) * 100);
-        const impColor = impPercent >= 60 ? 'var(--accent, #4fc3f7)' : impPercent >= 30 ? 'var(--text-secondary)' : 'var(--text-secondary)';
+        const impColor = impPercent >= 60 ? 'var(--accent, #4fc3f7)' : 'var(--text-secondary)';
         const ts = e.timestamp || e.created_at || '';
         const shortTs = ts.length > 16 ? ts.substring(0, 16) : ts;
+        const spaceLabel = miGetSpaceLabel(e);
+        const levelTag = miGetLevel(e);
 
         return '<div class="mi-entry" data-id="' + e.id + '" style="padding:10px; margin-bottom:6px; border-radius:8px; background:var(--card-bg); border:1px solid var(--border); position:relative;">'
             + '<div style="display:flex; align-items:flex-start; gap:8px;">'
             + '<input type="checkbox" class="mi-check" data-id="' + e.id + '" onchange="miUpdateSelectedCount()" style="margin-top:3px;">'
             + '<div style="flex:1; min-width:0;">'
             + '<div style="font-size:0.9rem; line-height:1.4; word-break:break-word;">' + escapeHtml(e.content) + '</div>'
-            + '<div style="display:flex; gap:10px; margin-top:4px; font-size:0.75rem; color:var(--text-secondary);">'
+            + '<div style="display:flex; gap:8px; margin-top:4px; font-size:0.73rem; color:var(--text-secondary); flex-wrap:wrap;">'
+            + '<span class="mi-badge">' + levelTag + '</span>'
             + '<span style="color:' + impColor + ';">权重 ' + (e.importance !== null ? e.importance : '--') + '</span>'
             + '<span>' + shortTs + '</span>'
+            + '<span>' + escapeHtml(spaceLabel) + '</span>'
+            + (e.group_id ? '<span>组: ' + escapeHtml(e.group_id.substring(0, 8)) + '</span>' : '')
             + '</div>'
             + '</div>'
             + '<button onclick="miDeleteEntry(' + e.id + ', this)" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:2px 6px; font-size:1.1rem;" title="删除">×</button>'
@@ -20976,7 +24844,7 @@ function renderMemoryIndexList(entries) {
 
 function escapeHtml(text) {
     if (!text) return '';
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function miPrevPage() {
@@ -21008,12 +24876,32 @@ async function miDeleteEntry(id, btn) {
     try {
         const resp = await fetch('/api/memory/index/' + id, {
             method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('lifeos_auth_token') }
         });
         if (resp.ok) {
-            // Remove from DOM
-            const entry = btn.closest('.mi-entry');
-            if (entry) entry.remove();
+            // Remove from cache and re-render to update group preview/count/importance
+            miAllEntries = miAllEntries.filter(e => e.id !== id);
+            miRenderCurrentView();
+            miLoadStats();
+        } else {
+            alert('删除失败');
+        }
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+async function miDeleteGroup(groupId, btn) {
+    if (!confirm('确定删除整组记忆？')) return;
+    try {
+        const resp = await fetch('/api/memory/index/group/' + encodeURIComponent(groupId), {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('lifeos_auth_token') }
+        });
+        if (resp.ok) {
+            miAllEntries = miAllEntries.filter(e => e.group_id !== groupId);
+            miRenderCurrentView();
+            miLoadStats();
         } else {
             alert('删除失败');
         }
@@ -21031,18 +24919,425 @@ async function miDeleteSelected() {
         const resp = await fetch('/api/memory/index', {
             method: 'DELETE',
             headers: {
-                'Authorization': 'Bearer ' + localStorage.getItem('token'),
+                'Authorization': 'Bearer ' + localStorage.getItem('lifeos_auth_token'),
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ ids })
         });
         if (resp.ok) {
-            const data = await resp.json();
-            loadMemoryIndex(); // Reload
+            loadMemoryIndex();
         } else {
             alert('批量删除失败');
         }
     } catch (e) {
         alert('批量删除失败: ' + e.message);
     }
+}
+
+// ============================================================
+// Proposal Inbox
+// ============================================================
+
+let _proposalCurrentFilter = 'pending_review';
+let _proposalRejectTargetId = null;
+
+async function loadProposalInbox(status) {
+    if (status) _proposalCurrentFilter = status;
+    const listEl = document.getElementById('proposal-inbox-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '<div style="text-align:center; opacity:0.5; padding:20px;">加载中…</div>';
+
+    try {
+        const data = await characterPackageApiFetch(
+            '/api/proposals?status=' + encodeURIComponent(_proposalCurrentFilter) + '&limit=50'
+        );
+        const proposals = data?.proposals || [];
+
+        if (!proposals.length) {
+            listEl.innerHTML = '<div style="text-align:center; opacity:0.45; padding:20px; font-size:0.85rem;">暂无提案</div>';
+        } else {
+            listEl.innerHTML = renderProposalList(proposals);
+        }
+
+        // Update badge with pending count (always fetch fresh count)
+        updateProposalBadge();
+    } catch (err) {
+        listEl.innerHTML = `<div style="color:#e05252; font-size:0.8rem; padding:10px;">加载失败: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function filterProposals(status) {
+    _proposalCurrentFilter = status;
+    document.querySelectorAll('.proposal-filter-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.pf === status);
+    });
+    loadProposalInbox(status);
+}
+
+function getProposalApprovalKind(p) {
+    const raw = String(p?.approvalKind || '').trim();
+    if (raw === 'auto' || raw === 'manual') return raw;
+    if (p?.status !== 'approved') return null;
+    return p?.reviewedBy ? 'manual' : 'auto';
+}
+
+function getProposalApprovalMeta(p) {
+    const kind = getProposalApprovalKind(p);
+    if (kind === 'auto') {
+        return {
+            kind,
+            label: '自动批准',
+            hint: '由低风险策略自动批准',
+            color: '#4f8f6d',
+            bg: 'rgba(79, 143, 109, 0.12)',
+            border: 'rgba(79, 143, 109, 0.28)'
+        };
+    }
+    if (kind === 'manual') {
+        return {
+            kind,
+            label: '人工批准',
+            hint: '经过人工审批',
+            color: '#4a7bb7',
+            bg: 'rgba(74, 123, 183, 0.12)',
+            border: 'rgba(74, 123, 183, 0.28)'
+        };
+    }
+    return null;
+}
+
+function getProposalDisplayReviewNote(p) {
+    const raw = String(p?.reviewNote || '').trim();
+    if (!raw) return '';
+    if (raw === 'auto-approved by risk policy') return '';
+    return raw;
+}
+
+function renderProposalList(proposals) {
+    if (_proposalCurrentFilter !== 'approved') {
+        return proposals.map(p => renderProposalCard(p)).join('');
+    }
+
+    const autoApproved = proposals.filter(p => getProposalApprovalKind(p) === 'auto');
+    const manuallyApproved = proposals.filter(p => getProposalApprovalKind(p) !== 'auto');
+    const sections = [];
+
+    if (autoApproved.length) {
+        sections.push(renderProposalSection(
+            '自动批准',
+            '低风险动作已直接进入执行链',
+            autoApproved,
+            '#4f8f6d'
+        ));
+    }
+    if (manuallyApproved.length) {
+        sections.push(renderProposalSection(
+            '人工批准',
+            '由你确认后进入执行链',
+            manuallyApproved,
+            '#4a7bb7'
+        ));
+    }
+
+    return sections.join('');
+}
+
+function renderProposalSection(title, subtitle, proposals, accentColor) {
+    const safeTitle = escapeHtml(String(title || ''));
+    const safeSubtitle = escapeHtml(String(subtitle || ''));
+    return `<div style="margin-bottom:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px;">
+            <div>
+                <div style="font-size:0.78rem; font-weight:700; color:${accentColor}; letter-spacing:.03em;">${safeTitle}</div>
+                <div style="font-size:0.68rem; opacity:0.55; margin-top:2px;">${safeSubtitle}</div>
+            </div>
+            <span style="flex-shrink:0; font-size:0.68rem; padding:2px 7px; border-radius:999px; background:${accentColor}18; color:${accentColor}; border:1px solid ${accentColor}33;">${proposals.length}</span>
+        </div>
+        ${proposals.map(p => renderProposalCard(p)).join('')}
+    </div>`;
+}
+
+function renderProposalCard(p) {
+    const riskColor = { low: '#5aad7a', medium: '#c8943a', high: '#e05252' }[p.riskLevel] || '#888';
+    const riskLabel = { low: '低风险', medium: '中风险', high: '高风险' }[p.riskLevel] || escapeHtml(String(p.riskLevel || ''));
+    const ts = (p.createdAt || '').slice(0, 16).replace('T', ' ');
+    const charLabel = escapeHtml(String(p.meta?.slug || p.characterId || '—'));
+    const titleText = escapeHtml(String(p.title || p.actionType || ''));
+    const approvalMeta = getProposalApprovalMeta(p);
+
+    let statusLine = '';
+    if (p.status !== 'pending_review') {
+        const execMap = {
+            scheduled: '⏳ 等待执行',
+            running: '⚙ 执行中',
+            delivered: '✓ 已送达',
+            retrying: '↻ 重试中',
+            failed: '✗ 执行失败',
+            rejected: '— 已拒绝',
+            approved_no_task: '✓ 已批准（无任务）'
+        };
+        const execStatus = execMap[p.executionStatus] || escapeHtml(String(p.executionStatus || ''));
+        const approvalLine = approvalMeta
+            ? `<div style="font-size:0.72rem; margin-top:6px; color:${approvalMeta.color};">${escapeHtml(approvalMeta.hint)}</div>`
+            : '';
+        const displayReviewNote = getProposalDisplayReviewNote(p);
+        const reviewNote = displayReviewNote
+            ? `<div style="font-size:0.72rem; opacity:0.6; margin-top:4px;">备注: ${escapeHtml(displayReviewNote)}</div>`
+            : '';
+        statusLine = `${approvalLine}<div style="font-size:0.72rem; margin-top:6px; color:var(--text-secondary);">${execStatus}${reviewNote}</div>`;
+    }
+
+    // p.id comes from the server and is a predictable alphanumeric key — safe to inline as attribute
+    const safeId = String(p.id || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+    const actionBtns = p.status === 'pending_review' ? `
+        <div style="display:flex; gap:8px; margin-top:10px;">
+            <button class="btn" style="flex:1; padding:6px 8px; font-size:0.8rem; background:#5aad7a;"
+                onclick="approveProposal('${safeId}')">批准</button>
+            <button class="btn" style="flex:1; padding:6px 8px; font-size:0.8rem; background:#e05252;"
+                onclick="openRejectDialog('${safeId}')">拒绝</button>
+        </div>` : '';
+
+    const summaryHtml = p.summary
+        ? `<div style="font-size:0.78rem; opacity:0.8; margin-bottom:4px;">${escapeHtml(String(p.summary))}</div>`
+        : '';
+    const approvalBadge = approvalMeta
+        ? `<span style="flex-shrink:0; font-size:0.68rem; padding:2px 7px; border-radius:6px; background:${approvalMeta.bg}; color:${approvalMeta.color}; border:1px solid ${approvalMeta.border};">${escapeHtml(approvalMeta.label)}</span>`
+        : '';
+    const accentBorder = approvalMeta ? approvalMeta.border : 'rgba(0, 0, 0, 0.08)';
+
+    return `<div style="border:1px solid ${accentBorder}; border-radius:10px; padding:12px; margin-bottom:10px; background:var(--card-bg);">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:6px;">
+            <div style="font-size:0.82rem; font-weight:600; flex:1;">${titleText}</div>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+                ${approvalBadge}
+                <span style="flex-shrink:0; font-size:0.68rem; padding:2px 7px; border-radius:6px; background:${riskColor}22; color:${riskColor}; border:1px solid ${riskColor}44;">${riskLabel}</span>
+            </div>
+        </div>
+        ${summaryHtml}
+        <div style="font-size:0.7rem; opacity:0.45;">${charLabel} · ${ts}</div>
+        ${statusLine}
+        ${actionBtns}
+        <div style="margin-top:8px; text-align:right;">
+            <button class="btn-sec" style="padding:3px 10px; font-size:0.72rem; width:auto; margin:0;"
+                onclick="openProposalDetail('${safeId}')">查看详情 ›</button>
+        </div>
+    </div>`;
+}
+
+async function approveProposal(id) {
+    const listEl = document.getElementById('proposal-inbox-list');
+    try {
+        await characterPackageApiFetch('/api/proposals/' + encodeURIComponent(id) + '/approve', {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+        loadProposalInbox();
+    } catch (err) {
+        if (listEl) listEl.insertAdjacentHTML('afterbegin',
+            `<div style="color:#e05252; font-size:0.8rem; padding:6px 0;">批准失败: ${escapeHtml(err.message)}</div>`);
+    }
+}
+
+function openRejectDialog(id) {
+    _proposalRejectTargetId = id;
+    const noteEl = document.getElementById('proposal-reject-note');
+    if (noteEl) noteEl.value = '';
+    document.getElementById('modal-proposal-reject').classList.add('active');
+}
+
+async function confirmRejectProposal() {
+    if (!_proposalRejectTargetId) return;
+    const note = (document.getElementById('proposal-reject-note')?.value || '').trim();
+    closeModal('modal-proposal-reject');
+    try {
+        await characterPackageApiFetch('/api/proposals/' + encodeURIComponent(_proposalRejectTargetId) + '/reject', {
+            method: 'POST',
+            body: JSON.stringify({ note })
+        });
+        loadProposalInbox();
+    } catch (err) {
+        const listEl = document.getElementById('proposal-inbox-list');
+        if (listEl) listEl.insertAdjacentHTML('afterbegin',
+            `<div style="color:#e05252; font-size:0.8rem; padding:6px 0;">拒绝失败: ${escapeHtml(err.message)}</div>`);
+    } finally {
+        _proposalRejectTargetId = null;
+    }
+}
+
+async function updateProposalBadge() {
+    const badge = document.getElementById('proposal-inbox-badge');
+    if (!badge) return;
+    try {
+        const data = await characterPackageApiFetch('/api/proposals?status=pending_review&limit=1');
+        const count = data?.totalCount ?? data?.count ?? 0;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = '';
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (_) {
+        badge.style.display = 'none';
+    }
+}
+
+async function openProposalDetail(id) {
+    const bodyEl = document.getElementById('proposal-detail-body');
+    if (!bodyEl) return;
+    bodyEl.innerHTML = '<div style="text-align:center; opacity:0.5; padding:30px;">加载中…</div>';
+    document.getElementById('modal-proposal-detail').classList.add('active');
+
+    try {
+        const data = await characterPackageApiFetch('/api/proposals/' + encodeURIComponent(id));
+        const p = data?.proposal;
+        if (!p) throw new Error('未找到提案数据');
+        bodyEl.innerHTML = renderProposalDetailBody(p);
+    } catch (err) {
+        bodyEl.innerHTML = `<div style="color:#e05252; padding:16px;">加载失败: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+function renderProposalDetailBody(p) {
+    const riskColor = { low: '#5aad7a', medium: '#c8943a', high: '#e05252' }[p.riskLevel] || '#888';
+    const riskLabel = { low: '低风险', medium: '中风险', high: '高风险' }[p.riskLevel] || escapeHtml(String(p.riskLevel || ''));
+    const statusLabel = { pending_review: '待审核', approved: '已批准', rejected: '已拒绝' }[p.status] || escapeHtml(String(p.status || ''));
+    const approvalMeta = getProposalApprovalMeta(p);
+    const execMap = {
+        scheduled: '⏳ 等待执行', running: '⚙ 执行中', delivered: '✓ 已送达',
+        retrying: '↻ 重试中', failed: '✗ 执行失败', rejected: '— 已拒绝',
+        approved_no_task: '✓ 已批准（无任务）', awaiting_review: '— 待审核'
+    };
+    const execStatusLabel = execMap[p.executionStatus] || escapeHtml(String(p.executionStatus || '—'));
+
+    const field = (label, val) => val
+        ? `<div style="margin-bottom:6px;"><span style="opacity:0.5; font-size:0.72rem;">${label}</span><div style="font-size:0.82rem; margin-top:2px;">${val}</div></div>`
+        : '';
+
+    const section = (title, content) =>
+        `<div style="margin-bottom:14px; padding:10px; background:var(--bg); border-radius:8px;">
+            <div style="font-size:0.7rem; font-weight:700; letter-spacing:.05em; opacity:0.4; margin-bottom:8px; text-transform:uppercase;">${title}</div>
+            ${content}
+        </div>`;
+
+    const jsonBlock = (obj) => {
+        if (!obj || (typeof obj === 'object' && !Object.keys(obj).length)) return '<span style="opacity:0.35; font-size:0.75rem;">空</span>';
+        return `<pre style="font-size:0.68rem; overflow-x:auto; white-space:pre-wrap; word-break:break-all; margin:0; opacity:0.8;">${escapeHtml(JSON.stringify(obj, null, 2))}</pre>`;
+    };
+
+    // Safe ID for inline onclick
+    const safeId = String(p.id || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+
+    // Header
+    let html = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:12px;">
+        <div style="font-size:0.95rem; font-weight:700; flex:1;">${escapeHtml(String(p.title || p.actionType || ''))}</div>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+            ${approvalMeta ? `<span style="flex-shrink:0; font-size:0.68rem; padding:2px 8px; border-radius:6px; background:${approvalMeta.bg}; color:${approvalMeta.color}; border:1px solid ${approvalMeta.border};">${escapeHtml(approvalMeta.label)}</span>` : ''}
+            <span style="flex-shrink:0; font-size:0.68rem; padding:2px 8px; border-radius:6px; background:${riskColor}22; color:${riskColor}; border:1px solid ${riskColor}44;">${riskLabel}</span>
+        </div>
+    </div>
+    <div style="font-size:0.75rem; opacity:0.5; margin-bottom:14px;">${escapeHtml(String(p.actionType || ''))} · ${statusLabel} · ${(p.createdAt || '').slice(0,16).replace('T',' ')}</div>`;
+
+    if (approvalMeta && p.status === 'approved') {
+        html += `<div style="margin-bottom:14px; padding:10px 12px; border-radius:8px; background:${approvalMeta.bg}; border:1px solid ${approvalMeta.border}; color:${approvalMeta.color}; font-size:0.78rem;">
+            ${escapeHtml(approvalMeta.hint)}。${approvalMeta.kind === 'auto' ? '这条提案没有进入人工待审队列。' : '这条提案已经过人工审批确认。'}
+        </div>`;
+    }
+
+    // Content section
+    let contentBody = '';
+    if (p.summary) contentBody += field('摘要', escapeHtml(String(p.summary)));
+    if (p.details) contentBody += field('详情', `<span style="white-space:pre-wrap;">${escapeHtml(String(p.details))}</span>`);
+    if (contentBody) html += section('内容', contentBody);
+
+    // Execution section
+    let execBody = field('提案状态', statusLabel) + field('执行状态', execStatusLabel);
+    if (approvalMeta && p.status === 'approved') execBody += field('审批方式', escapeHtml(approvalMeta.label));
+    if (p.reviewedAt) execBody += field('审批时间', (p.reviewedAt || '').slice(0,16).replace('T',' '));
+    if (getProposalDisplayReviewNote(p)) execBody += field('审批备注', escapeHtml(getProposalDisplayReviewNote(p)));
+    if (p.executionTaskId) execBody += field('执行任务 ID', `<span style="font-family:monospace; font-size:0.72rem;">${escapeHtml(String(p.executionTaskId))}</span>`);
+    if (p.executedAt) execBody += field('执行时间', (p.executedAt || '').slice(0,16).replace('T',' '));
+    html += section('执行状态', execBody);
+
+    // Source section
+    let srcBody = '';
+    if (p.sourceEventId) srcBody += field('来源事件 ID', `<span style="font-family:monospace; font-size:0.72rem;">${escapeHtml(String(p.sourceEventId))}</span>`);
+    if (p.sourceRuleId) srcBody += field('来源规则', escapeHtml(String(p.sourceRuleId)));
+    if (p.targetPlatform) srcBody += field('目标平台', escapeHtml(String(p.targetPlatform)));
+    if (p.targetSpaceKey) srcBody += field('目标空间', escapeHtml(String(p.targetSpaceKey)));
+    if (srcBody) html += section('来源', srcBody);
+
+    // Payload & Meta (collapsible via details/summary)
+    if (p.payload && Object.keys(p.payload).length) {
+        html += `<details style="margin-bottom:10px;">
+            <summary style="cursor:pointer; font-size:0.72rem; font-weight:600; opacity:0.5; letter-spacing:.05em; text-transform:uppercase; padding:6px 0;">Payload</summary>
+            <div style="margin-top:6px; padding:8px; background:var(--bg); border-radius:6px;">${jsonBlock(p.payload)}</div>
+        </details>`;
+    }
+    if (p.meta && Object.keys(p.meta).length) {
+        html += `<details style="margin-bottom:14px;">
+            <summary style="cursor:pointer; font-size:0.72rem; font-weight:600; opacity:0.5; letter-spacing:.05em; text-transform:uppercase; padding:6px 0;">Meta</summary>
+            <div style="margin-top:6px; padding:8px; background:var(--bg); border-radius:6px;">${jsonBlock(p.meta)}</div>
+        </details>`;
+    }
+
+    // Action area (only for pending)
+    if (p.status === 'pending_review') {
+        html += `<div style="border-top:1px solid var(--border); padding-top:14px; margin-top:4px;">
+            <div class="input-group" style="margin-bottom:10px;">
+                <label style="font-size:0.78rem;">审批备注（可选）</label>
+                <textarea id="proposal-detail-note" rows="2" placeholder="留空也可..."
+                    style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical; font-size:0.82rem;"></textarea>
+            </div>
+            <div style="display:flex; gap:8px;">
+                <button class="btn" style="flex:1; background:#5aad7a;" onclick="approveFromDetail('${safeId}')">批准</button>
+                <button class="btn" style="flex:1; background:#e05252;" onclick="rejectFromDetail('${safeId}')">拒绝</button>
+            </div>
+        </div>`;
+    }
+
+    return html;
+}
+
+async function approveFromDetail(id) {
+    const note = (document.getElementById('proposal-detail-note')?.value || '').trim();
+    const bodyEl = document.getElementById('proposal-detail-body');
+    try {
+        await characterPackageApiFetch('/api/proposals/' + encodeURIComponent(id) + '/approve', {
+            method: 'POST',
+            body: JSON.stringify({ note: note || undefined })
+        });
+        closeModal('modal-proposal-detail');
+        loadProposalInbox();
+    } catch (err) {
+        if (bodyEl) bodyEl.insertAdjacentHTML('afterbegin',
+            `<div style="color:#e05252; font-size:0.8rem; padding:6px 0; margin-bottom:8px;">批准失败: ${escapeHtml(err.message)}</div>`);
+    }
+}
+
+async function rejectFromDetail(id) {
+    const note = (document.getElementById('proposal-detail-note')?.value || '').trim();
+    const bodyEl = document.getElementById('proposal-detail-body');
+    try {
+        await characterPackageApiFetch('/api/proposals/' + encodeURIComponent(id) + '/reject', {
+            method: 'POST',
+            body: JSON.stringify({ note: note || undefined })
+        });
+        closeModal('modal-proposal-detail');
+        loadProposalInbox();
+    } catch (err) {
+        if (bodyEl) bodyEl.insertAdjacentHTML('afterbegin',
+            `<div style="color:#e05252; font-size:0.8rem; padding:6px 0; margin-bottom:8px;">拒绝失败: ${escapeHtml(err.message)}</div>`);
+    }
+}
+
+// --- [Vesper] 聊天 header 工具按钮展开/收起 ---
+function toggleChatExtraTools() {
+    const container = document.getElementById('chat-extra-tools');
+    const toggleBtn = document.getElementById('chat-tools-toggle-btn');
+    if (!container || !toggleBtn) return;
+
+    const isExpanded = container.classList.toggle('expanded');
+    toggleBtn.classList.toggle('active', isExpanded);
 }

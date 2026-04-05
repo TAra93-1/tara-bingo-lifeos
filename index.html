@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tara's LifeOS Chronos BinGO</title>
+    <title>Tara's AZOTH Chronos BinGO</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -63,7 +63,7 @@
         style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:99999; justify-content:center; align-items:center;">
         <div
             style="background:var(--bg-secondary, #1e1e1e); border-radius:16px; padding:40px; max-width:360px; width:90%; text-align:center; border:1px solid var(--border, #333);">
-            <h2 style="margin:0 0 8px; color:var(--text, #e0e0e0); font-size:20px;">LifeOS Cloud</h2>
+            <h2 style="margin:0 0 8px; color:var(--text, #e0e0e0); font-size:20px;">AZOTH Cloud</h2>
             <p style="margin:0 0 24px; color:var(--text-secondary, #888); font-size:13px;">Login to sync your data
                 across devices</p>
             <form id="cloud-login-form" style="display:flex; flex-direction:column; gap:12px;">
@@ -94,7 +94,7 @@
                 <line x1="3" y1="18" x2="21" y2="18"></line>
             </svg></span>
         <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-            <div class="app-name">Tara's LifeOS Chronos BinGO</div>
+            <div class="app-name">Tara's AZOTH Chronos BinGO</div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
             <div style="display:flex; align-items:center; gap:8px;">
@@ -201,6 +201,13 @@
                     </svg></span>
                 <span>任务中心</span>
             </div>
+            <div class="sidebar-menu-item" id="menu-proposal-inbox" onclick="openSidebarPanel('proposal-inbox')">
+                <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
+                        <path d="M22 12h-6l-2 3h-4l-2-3H2"></path>
+                        <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path>
+                    </svg></span>
+                <span>提案收件箱<span id="proposal-inbox-badge" style="display:none; margin-left:5px; background:var(--accent); color:#fff; font-size:0.65rem; border-radius:9px; padding:1px 6px; font-weight:700; vertical-align:middle;"></span></span>
+            </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('notifications')">
                 <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
@@ -210,7 +217,9 @@
             </div>
             <div class="sidebar-menu-item" onclick="openSidebarPanel('memory-index')">
                 <span class="menu-icon"><svg class="icon" viewBox="0 0 24 24">
-                        <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z"></path>
+                        <path
+                            d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93L12 22l-.75-12.07A4.001 4.001 0 0 1 12 2z">
+                        </path>
                         <circle cx="12" cy="6" r="1.5"></circle>
                     </svg></span>
                 <span>记忆索引</span>
@@ -1308,10 +1317,15 @@
             </div>
             <div class="input-group">
                 <label>模型</label>
-                <select id="main-api-model">
-                    <option value="gpt-4">gpt-4</option>
-                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                </select>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="main-api-model" list="main-api-model-list" placeholder="输入或选择模型名称" style="flex:1;">
+                    <button class="btn-sec" onclick="_showModelSelector('main')" style="padding:6px 8px;font-size:0.8rem;" title="展开模型列表">▼</button>
+                    <button class="btn-sec" onclick="openModelCapabilityEditor(document.getElementById('main-api-model').value, 'main-api-model')" style="padding:6px 8px;font-size:0.75rem;" title="编辑模型能力">⚙</button>
+                </div>
+                <datalist id="main-api-model-list">
+                    <option value="gpt-4">
+                    <option value="gpt-3.5-turbo">
+                </datalist>
             </div>
             <div class="input-group">
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
@@ -1406,15 +1420,64 @@
             </div>
             <div class="input-group">
                 <label>模型</label>
-                <select id="sub-api-model">
-                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                    <option value="gpt-4">gpt-4</option>
-                </select>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="sub-api-model" list="sub-api-model-list" placeholder="输入或选择模型名称" style="flex:1;">
+                    <button class="btn-sec" onclick="_showModelSelector('sub')" style="padding:6px 8px;font-size:0.8rem;" title="展开模型列表">▼</button>
+                    <button class="btn-sec" onclick="openModelCapabilityEditor(document.getElementById('sub-api-model').value, 'sub-api-model')" style="padding:6px 8px;font-size:0.75rem;" title="编辑模型能力">⚙</button>
+                </div>
+                <datalist id="sub-api-model-list">
+                    <option value="gpt-3.5-turbo">
+                    <option value="gpt-4">
+                </datalist>
             </div>
 
             <hr style="margin:20px 0; opacity:0.3;">
 
-            <h4 style="margin-bottom:10px; color:var(--accent);">🧠 Gateway 智能增强</h4>
+            <h4 style="margin-bottom:10px; color:var(--accent);">视觉模型配置（图片理解桥接）</h4>
+            <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
+                <div>
+                    <label style="margin:0;">启用视觉桥接</label>
+                    <div style="font-size:0.7rem; opacity:0.6; margin-top:3px;">当主模型不支持图片时，自动用视觉模型识图并隐藏注入上下文</div>
+                </div>
+                <input type="checkbox" id="vision-enabled" style="width:auto;">
+            </div>
+            <div class="input-group">
+                <label>反代地址</label>
+                <input type="text" id="vision-api-url" placeholder="https://api.openai.com/v1">
+            </div>
+            <div class="input-group">
+                <label>API密钥</label>
+                <input type="password" id="vision-api-key" placeholder="sk-...">
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:15px;">
+                <button class="btn-sec" style="flex:1;" onclick="fetchModels('vision')"><svg class="ico"
+                        viewBox="0 0 24 24">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                    </svg> 拉取模型</button>
+                <button class="btn-sec" style="flex:1;" onclick="testApiConnection('vision')"><svg class="ico"
+                        viewBox="0 0 24 24">
+                        <path
+                            d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a2.5 2.5 0 0 0 2.227 3.45h10.106a2.5 2.5 0 0 0 2.227-3.45l-5.069-10.127A2 2 0 0 1 14 9.527V2" />
+                        <path d="M8.5 2h7" />
+                        <path d="M7 16h10" />
+                    </svg> 测试连接</button>
+            </div>
+            <div class="input-group">
+                <label>模型</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="vision-api-model" list="vision-api-model-list" placeholder="输入或选择模型名称" style="flex:1;">
+                    <button class="btn-sec" onclick="_showModelSelector('vision')" style="padding:6px 8px;font-size:0.8rem;" title="展开模型列表">▼</button>
+                    <button class="btn-sec" onclick="openModelCapabilityEditor(document.getElementById('vision-api-model').value, 'vision-api-model')" style="padding:6px 8px;font-size:0.75rem;" title="编辑模型能力">⚙</button>
+                </div>
+                <datalist id="vision-api-model-list">
+                    <option value="gpt-4o-mini">
+                    <option value="gpt-4o">
+                </datalist>
+            </div>
+
+            <hr style="margin:20px 0; opacity:0.3;">
+
+            <h4 style="margin-bottom:10px; color:var(--accent);"> Gateway 智能增强</h4>
             <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
                 <div>
                     <label style="margin:0;">入站记忆注入 (Phase 1)</label>
@@ -1700,14 +1763,14 @@
                         </div>
                     </div>
                     <div class="input-group">
-                        <label>世界书扫描深度</label>
+                        <label>默认扫描深度</label>
                         <input type="number" id="character-worldbook-scan-depth" value="10" min="1" max="50">
                         <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
-                            💡 扫描最近N条消息来匹配世界书关键词。数值越大匹配范围越广，但可能激活不相关的条目。建议：5-15条
+                            💡 世界书条目默认扫描最近N条消息来匹配关键词。条目可在自身设置中覆盖此值。建议：5-15条
                         </div>
                     </div>
                     <div class="input-group">
-                        <label>语义匹配阈值</label>
+                        <label>默认语义阈值</label>
                         <input type="range" id="character-semantic-threshold" min="0.3" max="0.9" step="0.05"
                             value="0.55"
                             oninput="document.getElementById('semantic-threshold-value').textContent=this.value">
@@ -1718,7 +1781,7 @@
                             <span>严格 0.9</span>
                         </div>
                         <div style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
-                            💡 紫灯语义条目的激活阈值。越低越容易激活，越高越严格只激活高度相关的条目。建议：0.5-0.65
+                            💡 语义/混合触发条目的默认激活阈值。条目可在自身设置中覆盖此值。建议：0.5-0.65
                         </div>
                     </div>
                     <div class="input-group">
@@ -1748,16 +1811,379 @@
                     </div>
                 </div>
 
+                <!-- 能力管理 -->
+                <h4 class="settings-header">能力管理</h4>
+                <div class="settings-section">
+                    <div id="character-package-status"
+                        style="padding:12px; border-radius:10px; background:var(--bg); border:1px solid rgba(0,0,0,0.1); font-size:0.8rem; line-height:1.6; color:var(--text-secondary); margin-bottom:14px;">
+                        正在读取角色包...
+                    </div>
+                    <div
+                        style="padding:10px 12px; border-radius:10px; background:rgba(79, 195, 247, 0.06); border:1px solid rgba(79, 195, 247, 0.16); font-size:0.76rem; line-height:1.65; color:var(--text-secondary); margin-bottom:14px;">
+                        这里编辑的是<strong style="color:var(--text);">角色包基线配置</strong>。Discord 实际运行中的模型、URL、Vision 等值，仍可能被
+                        <code>!config</code> 或 <code>discord-bridge-config.json</code> 的 runtime override 覆盖。
+                    </div>
+                    <div id="character-package-runtime-summary"
+                        style="padding:10px 12px; border-radius:10px; background:rgba(255, 193, 7, 0.06); border:1px solid rgba(255, 193, 7, 0.18); font-size:0.76rem; line-height:1.65; color:var(--text-secondary); margin-bottom:14px;">
+                        正在读取当前 runtime override 摘要...
+                    </div>
+                    <details id="character-package-resolved-preview"
+                        style="display:none; margin-bottom:14px; border-radius:10px; border:1px solid rgba(0,0,0,0.1); overflow:hidden;">
+                        <summary
+                            style="padding:10px 12px; cursor:pointer; font-size:0.78rem; color:var(--text-secondary); user-select:none;">
+                            Resolved Preview（合并后生效值）
+                        </summary>
+                        <div style="padding:8px 12px 12px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div>
+                                <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">discord 平台视图</div>
+                                <pre id="character-package-resolved-discord"
+                                    style="margin:0; font-size:0.68rem; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto; background:var(--bg); border-radius:6px; padding:8px;">—</pre>
+                            </div>
+                            <div>
+                                <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">AZOTH 平台视图</div>
+                                <pre id="character-package-resolved-lifeos"
+                                    style="margin:0; font-size:0.68rem; white-space:pre-wrap; word-break:break-all; max-height:180px; overflow-y:auto; background:var(--bg); border-radius:6px; padding:8px;">—</pre>
+                            </div>
+                        </div>
+                    </details>
+                    <details id="character-package-prompt-preview"
+                        style="display:none; margin-bottom:14px; border-radius:10px; border:1px solid rgba(0,0,0,0.1); overflow:hidden;">
+                        <summary
+                            style="padding:10px 12px; cursor:pointer; font-size:0.78rem; color:var(--text-secondary); user-select:none;">
+                            Prompt Console（v3 preview）
+                        </summary>
+                        <div style="padding:10px 12px 12px;">
+                            <div style="display:grid; grid-template-columns:1fr 1fr auto auto; gap:8px; align-items:end; margin-bottom:10px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Surface</div>
+                                    <select id="character-package-prompt-surface" onchange="refreshCharacterPackagePromptPreview()">
+                                        <option value="chat">chat</option>
+                                        <option value="task">task</option>
+                                        <option value="proposal">proposal</option>
+                                        <option value="tick">tick</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Capability View</div>
+                                    <select id="character-package-prompt-capability-view" onchange="refreshCharacterPackagePromptPreview()">
+                                        <option value="materialized">materialized</option>
+                                        <option value="resolved">resolved</option>
+                                    </select>
+                                </div>
+                                <label style="display:flex; align-items:center; gap:8px; white-space:nowrap; margin-bottom:6px;">
+                                    <input type="checkbox" id="character-package-prompt-debug" style="width:auto;" checked onchange="refreshCharacterPackagePromptPreview()">
+                                    runtime debug
+                                </label>
+                                <button type="button" onclick="refreshCharacterPackagePromptPreview()"
+                                    style="padding:9px 12px; border-radius:8px; border:1px solid rgba(0,0,0,0.12); background:var(--bg); color:var(--text); cursor:pointer;">
+                                    刷新
+                                </button>
+                            </div>
+                            <div id="character-package-prompt-status"
+                                style="padding:8px 10px; border-radius:8px; background:rgba(79, 195, 247, 0.06); border:1px solid rgba(79, 195, 247, 0.16); font-size:0.74rem; line-height:1.6; color:var(--text-secondary); margin-bottom:10px;">
+                                Prompt Preview 尚未加载。
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">discord 平台 Prompt</div>
+                                    <pre id="character-package-prompt-discord-meta"
+                                        style="margin:0 0 8px; font-size:0.68rem; white-space:pre-wrap; word-break:break-word; max-height:140px; overflow-y:auto; background:var(--bg); border-radius:6px; padding:8px;">—</pre>
+                                    <pre id="character-package-prompt-discord-text"
+                                        style="margin:0 0 8px; font-size:0.68rem; white-space:pre-wrap; word-break:break-word; max-height:260px; overflow-y:auto; background:var(--bg); border-radius:6px; padding:8px;">—</pre>
+                                    <pre id="character-package-prompt-discord-debug"
+                                        style="margin:0; font-size:0.68rem; white-space:pre-wrap; word-break:break-word; max-height:180px; overflow-y:auto; background:rgba(0,0,0,0.03); border-radius:6px; padding:8px;">—</pre>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">AZOTH / LifeOS 平台 Prompt</div>
+                                    <pre id="character-package-prompt-lifeos-meta"
+                                        style="margin:0 0 8px; font-size:0.68rem; white-space:pre-wrap; word-break:break-word; max-height:140px; overflow-y:auto; background:var(--bg); border-radius:6px; padding:8px;">—</pre>
+                                    <pre id="character-package-prompt-lifeos-text"
+                                        style="margin:0 0 8px; font-size:0.68rem; white-space:pre-wrap; word-break:break-word; max-height:260px; overflow-y:auto; background:var(--bg); border-radius:6px; padding:8px;">—</pre>
+                                    <pre id="character-package-prompt-lifeos-debug"
+                                        style="margin:0; font-size:0.68rem; white-space:pre-wrap; word-break:break-word; max-height:180px; overflow-y:auto; background:rgba(0,0,0,0.03); border-radius:6px; padding:8px;">—</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                    <div id="character-package-create-section" style="display:none; margin-bottom:14px;">
+                        <div class="input-group" style="margin-bottom:10px;">
+                            <label>角色包 slug（小写英文，用于目录名）</label>
+                            <input type="text" id="character-package-create-slug" placeholder="例如 newchar"
+                                style="font-family:monospace;">
+                        </div>
+                        <button id="character-package-create-btn"
+                            onclick="createCharacterPackage()"
+                            style="width:100%; padding:10px; border-radius:10px; border:1px solid rgba(76,175,80,0.3); background:rgba(76,175,80,0.08); color:var(--text); font-size:0.85rem; cursor:pointer;">
+                            为当前角色创建角色包骨架
+                        </button>
+                    </div>
+                    <fieldset id="character-package-fieldset" disabled
+                        style="border:0; padding:0; margin:0; min-width:0;">
+                        <div class="input-group">
+                            <label>角色包标识</label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                <input type="text" id="character-package-slug-display" placeholder="slug" readonly>
+                                <input type="text" id="character-package-character-id" placeholder="characterId" readonly>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>角色包默认模型</label>
+                            <input type="text" id="character-package-default-model"
+                                placeholder="例如 claude-opus-4-6-thinking">
+                        </div>
+                        <div class="input-group">
+                            <label>Obsidian Vault 关键字</label>
+                            <input type="text" id="character-package-vault-keyword" placeholder="例如 claude">
+                        </div>
+                        <div class="input-group">
+                            <label>工具权限策略</label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">记忆工具</div>
+                                    <select id="character-package-tool-memory">
+                                        <option value="disabled">disabled</option>
+                                        <option value="read_only">read_only</option>
+                                        <option value="read_write">read_write</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Obsidian</div>
+                                    <select id="character-package-tool-obsidian">
+                                        <option value="disabled">disabled</option>
+                                        <option value="read_only">read_only</option>
+                                        <option value="read_write">read_write</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Web Search</div>
+                                    <select id="character-package-tool-web-search">
+                                        <option value="disabled">disabled</option>
+                                        <option value="read_only">read_only</option>
+                                        <option value="read_write">read_write</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Web Fetch</div>
+                                    <select id="character-package-tool-web-fetch">
+                                        <option value="disabled">disabled</option>
+                                        <option value="read_only">read_only</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">web_fetch 每日上限</div>
+                                    <input type="number" id="character-package-web-fetch-max-per-day" min="1" max="100"
+                                        value="5">
+                                </div>
+                                <div id="character-package-evidence-hydration-info"
+                                    style="font-size:0.72rem; color:var(--text-secondary); align-self:end; padding-bottom:8px;">
+                                    evidence_hydration: —
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>记忆策略</label>
+                            <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">默认池</div>
+                                    <select id="character-package-memory-default-pool">
+                                        <option value="private_character">private_character</option>
+                                        <option value="private_space">private_space</option>
+                                        <option value="shared_public_fact">shared_public_fact</option>
+                                    </select>
+                                </div>
+                                <label
+                                    style="display:flex; align-items:center; gap:8px; white-space:nowrap; margin-bottom:6px;">
+                                    <input type="checkbox" id="character-package-memory-allow-shared-recall"
+                                        style="width:auto;">
+                                    允许 shared recall
+                                </label>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>视觉策略</label>
+                            <div style="display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:end;">
+                                <label
+                                    style="display:flex; align-items:center; gap:8px; white-space:nowrap; margin-bottom:6px;">
+                                    <input type="checkbox" id="character-package-vision-enabled" style="width:auto;">
+                                    启用视觉
+                                </label>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">单次最大图片数</div>
+                                    <input type="number" id="character-package-vision-max-images" min="1" max="10"
+                                        value="5">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>配额策略（quota）</label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">每日主动触达上限</div>
+                                    <input type="number" id="character-package-quota-daily-outreach" min="0" max="100"
+                                        value="1">
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">同类行为冷却（小时）</div>
+                                    <input type="number" id="character-package-quota-cooldown-hours" min="0" max="168"
+                                        value="6">
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">research 每日搜索上限</div>
+                                    <input type="number" id="character-package-quota-searches-per-day" min="0" max="200"
+                                        value="5">
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">research 每日 fetch 上限</div>
+                                    <input type="number" id="character-package-quota-fetches-per-day" min="0" max="100"
+                                        value="3">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>Discord 绑定</label>
+                            <div style="display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:end;">
+                                <label
+                                    style="display:flex; align-items:center; gap:8px; white-space:nowrap; margin-bottom:6px;">
+                                    <input type="checkbox" id="character-package-discord-enabled" style="width:auto;">
+                                    已启用
+                                </label>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Bot 名称</div>
+                                    <input type="text" id="character-package-discord-bot-name" placeholder="例如 Claude">
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">Token 环境变量</div>
+                                    <input type="text" id="character-package-discord-token-env"
+                                        placeholder="DISCORD_TOKEN_CLAUDE">
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">API Key 环境变量</div>
+                                    <input type="text" id="character-package-discord-api-key-env"
+                                        placeholder="CLAUDE_API_KEY">
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">API URL</div>
+                                    <input type="text" id="character-package-discord-api-url"
+                                        placeholder="https://example.com/v1">
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">平台默认模型</div>
+                                    <input type="text" id="character-package-discord-api-model"
+                                        placeholder="例如 claude-opus-4-6-thinking">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>AZOTH 绑定</label>
+                            <div style="display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:end;">
+                                <label
+                                    style="display:flex; align-items:center; gap:8px; white-space:nowrap; margin-bottom:6px;">
+                                    <input type="checkbox" id="character-package-lifeos-enabled" style="width:auto;">
+                                    已启用
+                                </label>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">API Key 环境变量</div>
+                                    <input type="text" id="character-package-lifeos-api-key-env"
+                                        placeholder="CLAUDE_API_KEY">
+                                </div>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">API URL</div>
+                                    <input type="text" id="character-package-lifeos-api-url"
+                                        placeholder="https://example.com/v1">
+                                </div>
+                                <div>
+                                    <div style="font-size:0.72rem; opacity:0.7; margin-bottom:4px;">平台默认模型</div>
+                                    <input type="text" id="character-package-lifeos-api-model"
+                                        placeholder="例如 claude-opus-4-6-thinking">
+                                </div>
+                            </div>
+                            <div style="margin-top:10px;">
+                                <div style="font-size:0.72rem; opacity:0.7; margin-bottom:6px;">功能开关</div>
+                                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem;">
+                                        <input type="checkbox" id="character-package-lifeos-feature-chat"
+                                            style="width:auto;"> chat
+                                    </label>
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem;">
+                                        <input type="checkbox" id="character-package-lifeos-feature-bg"
+                                            style="width:auto;"> background_activity
+                                    </label>
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem;">
+                                        <input type="checkbox" id="character-package-lifeos-feature-obsidian"
+                                            style="width:auto;"> obsidian_search
+                                    </label>
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem;">
+                                        <input type="checkbox" id="character-package-lifeos-feature-mcp"
+                                            style="width:auto;"> mcp_tools
+                                    </label>
+                                    <label style="display:flex; align-items:center; gap:4px; font-size:0.8rem;">
+                                        <input type="checkbox" id="character-package-lifeos-feature-vision"
+                                            style="width:auto;"> vision
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label>Skills（每行一个 ID 或 JSON）</label>
+                            <textarea id="character-package-skills" rows="5"
+                                placeholder='例如&#10;memory_search&#10;{"id":"summarize","enabled":true}'></textarea>
+                        </div>
+                        <div class="input-group">
+                            <label>Plugins（每行一个 ID 或 JSON）</label>
+                            <textarea id="character-package-plugins" rows="5"
+                                placeholder='例如&#10;discord_slash_commands&#10;{"id":"vision_sidecar","enabled":true}'></textarea>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <!-- Hooks 执行日志 -->
+                <h4 class="settings-header">Hooks 执行日志</h4>
+                <div class="settings-section">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-size:0.78rem; color:var(--text-secondary);">最近触发记录（SQLite 持久，保留 7 天）</span>
+                        <button class="btn-sec" style="width:auto; padding:4px 12px; margin:0; font-size:0.78rem;"
+                            onclick="loadHooksLog()">刷新</button>
+                    </div>
+                    <div id="hooks-log-stats"
+                        style="font-size:0.74rem; color:var(--text-secondary); margin-bottom:8px; font-family:monospace;">—</div>
+                    <div id="hooks-log-list"
+                        style="font-size:0.72rem; line-height:1.7; max-height:260px; overflow-y:auto;
+                               font-family:monospace; background:var(--bg); border-radius:8px;
+                               padding:10px; border:1px solid rgba(0,0,0,0.08);">
+                        <span style="opacity:0.45;">点击"刷新"加载…</span>
+                    </div>
+                </div>
+
                 <!-- 外观 -->
                 <h4 class="settings-header">外观自定义</h4>
                 <div class="settings-section">
-                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
-                        <label style="margin:0;">聊天背景跟随主题</label>
-                        <input type="checkbox" id="character-detail-bg-follow" style="width:auto;" checked>
+                    <div class="input-group">
+                        <label>聊天界面外观</label>
+                        <input type="hidden" id="character-detail-chat-ui-mode" value="theme">
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button type="button" id="ui-mode-theme-btn" class="btn-sec active" style="flex:1; padding:8px; display:flex; align-items:center; justify-content:center; min-width:70px;" onclick="setChatUiMode('theme')">跟随主题</button>
+                            <button type="button" id="ui-mode-chatgpt-btn" class="btn-sec" style="flex:1; padding:8px; display:flex; align-items:center; justify-content:center; min-width:70px;" onclick="setChatUiMode('chatgpt')">仿 ChatGPT</button>
+                        </div>
                     </div>
-                    <div class="input-group" style="display:flex; align-items:center; justify-content:space-between;">
-                        <label style="margin:0;">显示角色和用户头像</label>
-                        <input type="checkbox" id="character-detail-show-avatar" style="width:auto;" checked>
+                    <div class="input-group">
+                        <label>头像显示</label>
+                        <input type="hidden" id="character-detail-avatar-display-mode" value="both">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                            <button type="button" id="avatar-mode-both-btn" class="btn-sec active" style="padding:8px; display:flex; align-items:center; justify-content:center;" onclick="setAvatarDisplayMode('both')">全部</button>
+                            <button type="button" id="avatar-mode-none-btn" class="btn-sec" style="padding:8px; display:flex; align-items:center; justify-content:center;" onclick="setAvatarDisplayMode('none')">不显示</button>
+                            <button type="button" id="avatar-mode-assistant_only-btn" class="btn-sec" style="padding:8px; display:flex; align-items:center; justify-content:center;" onclick="setAvatarDisplayMode('assistant_only')">仅角色</button>
+                            <button type="button" id="avatar-mode-user_only-btn" class="btn-sec" style="padding:8px; display:flex; align-items:center; justify-content:center;" onclick="setAvatarDisplayMode('user_only')">仅用户</button>
+                        </div>
                     </div>
                     <div class="input-group">
                         <label>聊天气泡字体大小 (px)</label>
@@ -2026,6 +2452,22 @@
                             <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                         </svg></button>
                     <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;"
+                        onclick="exportCurrentWorldBook('lifeos')" title="导出 AZOTH 格式"><svg width="12" height="12"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="square">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg></button>
+                    <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;"
+                        onclick="exportCurrentWorldBook('tavern')" title="导出 Tavern 格式"><svg width="12" height="12"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="square">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>T</button>
+                    <button class="btn-sec" style="width:auto; padding:5px 10px; font-size:0.75rem;"
                         onclick="deleteCurrentWorldBook()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"
                             stroke="currentColor" stroke-width="2" stroke-linecap="square">
                             <polyline points="3 6 5 6 21 6" />
@@ -2054,8 +2496,10 @@
 
     <!-- 创建/编辑条目 -->
     <div id="modal-edit-entry" class="modal">
-        <div class="sheet">
+        <div class="sheet" style="max-width:520px;">
             <h3 style="margin-bottom:15px;" id="entry-edit-title">新建条目</h3>
+
+            <!-- 基础信息 -->
             <div class="input-group">
                 <label>条目名称</label>
                 <input type="text" id="entry-name" placeholder="例如：艾尔登王国">
@@ -2065,41 +2509,128 @@
             <div class="input-group">
                 <label>触发模式</label>
                 <input type="hidden" id="entry-trigger-mode" value="keyword">
-                <div style="display:flex; gap:8px;">
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
                     <button type="button" id="trigger-always-btn" class="btn-sec"
-                        style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;"
+                        style="flex:1; padding:8px; display:flex; align-items:center; justify-content:center; gap:5px; min-width:70px;"
                         onclick="setTriggerMode('always')">
                         <span
-                            style="width:12px; height:12px; border-radius:50%; background:#2196F3; box-shadow:0 0 6px #2196F3;"></span>
+                            style="width:10px; height:10px; border-radius:50%; background:#2196F3; box-shadow:0 0 5px #2196F3;"></span>
                         <span>常驻</span>
                     </button>
                     <button type="button" id="trigger-keyword-btn" class="btn-sec active"
-                        style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;"
+                        style="flex:1; padding:8px; display:flex; align-items:center; justify-content:center; gap:5px; min-width:70px;"
                         onclick="setTriggerMode('keyword')">
                         <span
-                            style="width:12px; height:12px; border-radius:50%; background:#4CAF50; box-shadow:0 0 6px #4CAF50;"></span>
+                            style="width:10px; height:10px; border-radius:50%; background:#4CAF50; box-shadow:0 0 5px #4CAF50;"></span>
                         <span>关键词</span>
                     </button>
                     <button type="button" id="trigger-semantic-btn" class="btn-sec"
-                        style="flex:1; padding:10px; display:flex; align-items:center; justify-content:center; gap:6px;"
+                        style="flex:1; padding:8px; display:flex; align-items:center; justify-content:center; gap:5px; min-width:70px;"
                         onclick="setTriggerMode('semantic')">
                         <span
-                            style="width:12px; height:12px; border-radius:50%; background:#9C27B0; box-shadow:0 0 6px #9C27B0;"></span>
+                            style="width:10px; height:10px; border-radius:50%; background:#9C27B0; box-shadow:0 0 5px #9C27B0;"></span>
                         <span>语义</span>
+                    </button>
+                    <button type="button" id="trigger-hybrid-btn" class="btn-sec"
+                        style="flex:1; padding:8px; display:flex; align-items:center; justify-content:center; gap:5px; min-width:70px;"
+                        onclick="setTriggerMode('hybrid')">
+                        <span
+                            style="width:10px; height:10px; border-radius:50%; background:linear-gradient(135deg, #4CAF50 50%, #9C27B0 50%); box-shadow:0 0 5px #7B1FA2;"></span>
+                        <span>混合</span>
                     </button>
                 </div>
             </div>
 
+            <!-- 关键词匹配设置 -->
             <div class="input-group">
-                <label>关键词（用英文逗号分隔）</label>
+                <label>主关键词（用英文逗号分隔）</label>
                 <input type="text" id="entry-keys" placeholder="例如：王国,艾尔登,首都">
                 <div id="entry-keys-hint" style="font-size:0.7rem; opacity:0.6; margin-top:5px;">
                     绿灯关键词模式：当对话中出现这些关键词时，该条目才会被激活</div>
             </div>
+            <div class="input-group" id="entry-secondary-keys-group">
+                <label>次关键词（可选，用英文逗号分隔）</label>
+                <input type="text" id="entry-secondary-keys" placeholder="可选的辅助关键词">
+            </div>
+
+            <!-- 关键词行为 -->
+            <div id="entry-keyword-options" style="display:flex; gap:12px; margin-bottom:12px; font-size:0.8rem;">
+                <label style="display:flex; align-items:center; gap:4px; margin:0;">
+                    <input type="checkbox" id="entry-use-regex" style="width:auto;"> 正则
+                </label>
+                <label style="display:flex; align-items:center; gap:4px; margin:0;">
+                    <input type="checkbox" id="entry-case-sensitive" style="width:auto;"> 大小写
+                </label>
+                <label style="display:flex; align-items:center; gap:4px; margin:0;">
+                    <input type="checkbox" id="entry-match-whole" style="width:auto;"> 全词
+                </label>
+            </div>
+
+            <!-- 内容 -->
             <div class="input-group">
                 <label>内容</label>
-                <textarea id="entry-content" rows="8" placeholder="详细描述这个条目的内容..."></textarea>
+                <textarea id="entry-content" rows="6" placeholder="详细描述这个条目的内容..."></textarea>
             </div>
+
+            <!-- 局部调整 -->
+            <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer; font-size:0.85rem; font-weight:500; padding:6px 0;">局部调整 (覆盖角色默认值)
+                </summary>
+                <div style="padding:8px 0; display:flex; flex-direction:column; gap:10px;">
+                    <div class="input-group" style="margin:0;">
+                        <label>条目扫描深度 (留空用角色默认)</label>
+                        <input type="number" id="entry-scan-depth-override" min="1" max="50" placeholder="默认跟随角色设置">
+                    </div>
+                    <div class="input-group" style="margin:0;">
+                        <label>条目语义阈值 (留空用角色默认)</label>
+                        <input type="number" id="entry-semantic-threshold-override" min="0.1" max="0.95" step="0.05"
+                            placeholder="默认跟随角色设置">
+                    </div>
+                </div>
+            </details>
+
+            <!-- 注入控制 -->
+            <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer; font-size:0.85rem; font-weight:500; padding:6px 0;">注入控制 <span
+                        style="font-size:0.7rem; font-weight:normal; opacity:0.5;">(MVP 已生效，区块模拟注入)</span></summary>
+                <div style="padding:8px 0; display:flex; flex-direction:column; gap:10px;">
+                    <div class="input-group" style="margin:0;">
+                        <label>注入位置</label>
+                        <select id="entry-insertion-position"
+                            style="padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                            <option value="system_before">系统前置 (角色设定之前)</option>
+                            <option value="system_after">系统补充 (角色设定之后)</option>
+                            <option value="user">用户侧上下文</option>
+                            <option value="assistant">助手侧引导</option>
+                        </select>
+                    </div>
+                    <div class="input-group" style="margin:0;">
+                        <label>优先级 (数字越大越靠前)</label>
+                        <input type="number" id="entry-priority" value="0" min="-100" max="100">
+                    </div>
+                </div>
+            </details>
+
+            <!-- 高级设置 -->
+            <details style="margin-bottom:12px;">
+                <summary style="cursor:pointer; font-size:0.85rem; font-weight:500; padding:6px 0;">高级设置 <span
+                        style="font-size:0.7rem; font-weight:normal; opacity:0.5;">(sticky/cooldown/delay 暂未生效)</span></summary>
+                <div style="padding:8px 0; display:flex; flex-direction:column; gap:10px;">
+                    <div class="input-group" style="margin:0;">
+                        <label>Sticky (激活后保持N轮)</label>
+                        <input type="number" id="entry-sticky" value="0" min="0" max="100">
+                    </div>
+                    <div class="input-group" style="margin:0;">
+                        <label>Cooldown (激活后冷却N轮)</label>
+                        <input type="number" id="entry-cooldown" value="0" min="0" max="100">
+                    </div>
+                    <div class="input-group" style="margin:0;">
+                        <label>Delay (延迟N轮后才可激活)</label>
+                        <input type="number" id="entry-delay" value="0" min="0" max="100">
+                    </div>
+                </div>
+            </details>
+
             <div class="input-group" style="display:flex; align-items:center; gap:10px; margin-bottom:0;">
                 <label style="margin:0; flex:1;">启用条目</label>
                 <input type="checkbox" id="entry-enabled" checked style="width:auto;">
@@ -2117,7 +2648,9 @@
                 <h3 style="margin:0;">🔔 通知设置</h3>
                 <span style="width:30px;"></span>
             </div>
-            <div id="notify-permission-status" style="margin-bottom:15px; padding:10px; border-radius:8px; background:var(--card-bg); font-size:0.85rem;"></div>
+            <div id="notify-permission-status"
+                style="margin-bottom:15px; padding:10px; border-radius:8px; background:var(--card-bg); font-size:0.85rem;">
+            </div>
             <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
                 <label style="margin-bottom:0;">启用推送通知</label>
                 <input type="checkbox" id="notify-enabled" onchange="toggleNotifications()">
@@ -2126,7 +2659,16 @@
                 <label style="margin-bottom:0;">任务执行通知</label>
                 <input type="checkbox" id="notify-task-delivery" checked>
             </div>
+            <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="margin-bottom:0;">新提案通知</label>
+                <input type="checkbox" id="notify-proposal-created" checked>
+            </div>
+            <div class="input-group" style="display:flex; justify-content:space-between; align-items:center;">
+                <label style="margin-bottom:0;">提案审批结果通知</label>
+                <input type="checkbox" id="notify-proposal-reviewed" checked>
+            </div>
             <button class="btn" onclick="saveNotifySettings()">保存设置</button>
+            <button class="btn btn-sec" style="margin-top:10px;" onclick="testPushNotification(this)">🔔 发送测试通知</button>
             <button class="btn btn-sec" style="margin-top:10px;" onclick="closePanelBack()">关闭</button>
         </div>
     </div>
@@ -2436,7 +2978,8 @@
     <!-- Task Center Panel (Phase 5.6-C) -->
     <div id="panel-task-center" class="sidebar-panel modal">
         <div class="sheet">
-            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div class="header"
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <span class="back-btn" onclick="closePanelBack()">&#8249;</span>
                 <h3 style="margin:0;">任务中心</h3>
                 <span style="width:30px;"></span>
@@ -2445,10 +2988,14 @@
 
             <!-- Filter tabs -->
             <div id="task-filter-tabs" style="display:flex; gap:6px; margin-bottom:15px; flex-wrap:wrap;">
-                <button class="btn-sec task-filter-btn active" data-filter="all" onclick="filterTasks('all')" style="padding:4px 10px; font-size:0.75rem;">全部</button>
-                <button class="btn-sec task-filter-btn" data-filter="enabled" onclick="filterTasks('enabled')" style="padding:4px 10px; font-size:0.75rem;">启用中</button>
-                <button class="btn-sec task-filter-btn" data-filter="disabled" onclick="filterTasks('disabled')" style="padding:4px 10px; font-size:0.75rem;">已停用</button>
-                <button class="btn-sec task-filter-btn" data-filter="failed" onclick="filterTasks('failed')" style="padding:4px 10px; font-size:0.75rem;">失败</button>
+                <button class="btn-sec task-filter-btn active" data-filter="all" onclick="filterTasks('all')"
+                    style="padding:4px 10px; font-size:0.75rem;">全部</button>
+                <button class="btn-sec task-filter-btn" data-filter="enabled" onclick="filterTasks('enabled')"
+                    style="padding:4px 10px; font-size:0.75rem;">启用中</button>
+                <button class="btn-sec task-filter-btn" data-filter="disabled" onclick="filterTasks('disabled')"
+                    style="padding:4px 10px; font-size:0.75rem;">已停用</button>
+                <button class="btn-sec task-filter-btn" data-filter="failed" onclick="filterTasks('failed')"
+                    style="padding:4px 10px; font-size:0.75rem;">失败</button>
             </div>
 
             <!-- Task list -->
@@ -2464,7 +3011,8 @@
     <!-- Task Editor Modal -->
     <div id="modal-task-editor" class="modal modal-on-top">
         <div class="sheet" style="max-width:500px; margin:auto;">
-            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div class="header"
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                 <span class="back-btn" onclick="closeModal('modal-task-editor')">&#8249;</span>
                 <h3 id="task-editor-title" style="margin:0;">新建任务</h3>
                 <span style="width:30px;"></span>
@@ -2476,34 +3024,41 @@
             <div class="input-group">
                 <label>任务类型</label>
                 <div style="display:flex; gap:10px;">
-                    <button class="btn btn-sec task-type-btn active" data-type="one_time" onclick="selectTaskType('one_time')">一次性</button>
-                    <button class="btn btn-sec task-type-btn" data-type="scheduled" onclick="selectTaskType('scheduled')">定时</button>
+                    <button class="btn btn-sec task-type-btn active" data-type="one_time"
+                        onclick="selectTaskType('one_time')">一次性</button>
+                    <button class="btn btn-sec task-type-btn" data-type="scheduled"
+                        onclick="selectTaskType('scheduled')">定时</button>
                 </div>
             </div>
             <div id="task-schedule-group" class="input-group" style="display:none;">
                 <label>Cron 表达式</label>
                 <input type="text" id="task-editor-cron" placeholder="0 8 * * * (每天8点)">
-                <div style="font-size:0.7rem; opacity:0.5; margin-top:4px;">格式：分 时 日 月 周 | 例：0 8 * * * = 每天8:00, */30 * * * * = 每30分钟</div>
+                <div style="font-size:0.7rem; opacity:0.5; margin-top:4px;">格式：分 时 日 月 周 | 例：0 8 * * * = 每天8:00, */30 *
+                    * * * = 每30分钟</div>
             </div>
             <div class="input-group">
                 <label>目标角色</label>
-                <select id="task-editor-character" onchange="loadTaskEditorSessions()" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                <select id="task-editor-character" onchange="loadTaskEditorSessions()"
+                    style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
                     <option value="">选择角色...</option>
                 </select>
             </div>
             <div class="input-group">
                 <label>目标会话</label>
-                <select id="task-editor-session" style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+                <select id="task-editor-session"
+                    style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
                     <option value="">选择会话...</option>
                 </select>
             </div>
             <div class="input-group">
                 <label>系统提示词 (可选)</label>
-                <textarea id="task-editor-system-prompt" rows="3" placeholder="给 AI 的系统指令..." style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical;"></textarea>
+                <textarea id="task-editor-system-prompt" rows="3" placeholder="给 AI 的系统指令..."
+                    style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical;"></textarea>
             </div>
             <div class="input-group">
                 <label>任务消息</label>
-                <textarea id="task-editor-message" rows="3" placeholder="发送给 AI 的内容..." style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical;"></textarea>
+                <textarea id="task-editor-message" rows="3" placeholder="发送给 AI 的内容..."
+                    style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical;"></textarea>
             </div>
             <div class="input-group">
                 <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -2513,6 +3068,73 @@
             </div>
             <button class="btn" style="margin-top:15px;" onclick="saveTask()">保存</button>
             <button class="btn btn-sec" style="margin-top:10px;" onclick="closeModal('modal-task-editor')">取消</button>
+        </div>
+    </div>
+
+    <!-- Proposal Inbox Panel -->
+    <div id="panel-proposal-inbox" class="sidebar-panel modal">
+        <div class="sheet">
+            <div class="header"
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <span class="back-btn" onclick="closePanelBack()">&#8249;</span>
+                <h3 style="margin:0;">提案收件箱</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <p style="font-size:0.8rem; opacity:0.7; margin-bottom:15px;">角色自治系统产生的行动提案，等待你审批后执行。</p>
+
+            <!-- Filter tabs -->
+            <div id="proposal-filter-tabs" style="display:flex; gap:6px; margin-bottom:15px; flex-wrap:wrap;">
+                <button class="btn-sec proposal-filter-btn active" data-pf="pending_review"
+                    onclick="filterProposals('pending_review')"
+                    style="padding:4px 10px; font-size:0.75rem;">待审核</button>
+                <button class="btn-sec proposal-filter-btn" data-pf="approved"
+                    onclick="filterProposals('approved')"
+                    style="padding:4px 10px; font-size:0.75rem;">已批准</button>
+                <button class="btn-sec proposal-filter-btn" data-pf="rejected"
+                    onclick="filterProposals('rejected')"
+                    style="padding:4px 10px; font-size:0.75rem;">已拒绝</button>
+            </div>
+
+            <!-- List -->
+            <div id="proposal-inbox-list" style="margin-bottom:20px;">
+                <div style="text-align:center; opacity:0.5; padding:20px;">加载中...</div>
+            </div>
+
+            <button class="btn btn-sec" onclick="closePanelBack()">关闭</button>
+        </div>
+    </div>
+
+    <!-- Proposal Reject Note Modal -->
+    <div id="modal-proposal-reject" class="modal modal-on-top">
+        <div class="sheet" style="max-width:380px; margin:auto;">
+            <div class="header"
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <span class="back-btn" onclick="closeModal('modal-proposal-reject')">&#8249;</span>
+                <h3 style="margin:0; font-size:1rem;">拒绝提案</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <div class="input-group">
+                <label style="font-size:0.8rem;">拒绝原因（可选）</label>
+                <textarea id="proposal-reject-note" rows="3" placeholder="简单说明原因，留空也可..."
+                    style="width:100%; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text); resize:vertical; font-size:0.85rem;"></textarea>
+            </div>
+            <button class="btn" style="background:#e05252; margin-top:10px;" onclick="confirmRejectProposal()">确认拒绝</button>
+            <button class="btn btn-sec" style="margin-top:8px;" onclick="closeModal('modal-proposal-reject')">取消</button>
+        </div>
+    </div>
+
+    <!-- Proposal Detail Modal -->
+    <div id="modal-proposal-detail" class="modal modal-on-top">
+        <div class="sheet" style="max-width:520px; margin:auto; max-height:88vh; overflow-y:auto;">
+            <div class="header"
+                style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <span class="back-btn" onclick="closeModal('modal-proposal-detail')">&#8249;</span>
+                <h3 style="margin:0; font-size:1rem;">提案详情</h3>
+                <span style="width:30px;"></span>
+            </div>
+            <div id="proposal-detail-body">
+                <div style="text-align:center; opacity:0.5; padding:30px;">加载中…</div>
+            </div>
         </div>
     </div>
 
@@ -2746,8 +3368,9 @@
                 <input type="text" id="import-book-title" placeholder="请输入书名">
             </div>
             <div class="input-group">
-                <label>选择文件 (支持 .txt / .epub / .md)</label>
-                <input type="file" id="import-book-file" accept=".txt,.epub,.md" style="padding:8px;">
+                <label>选择文件 (支持 .txt / .epub / .md / .pdf)</label>
+                <input type="file" id="import-book-file" accept=".txt,.epub,.md,.pdf" style="padding:8px;">
+                <div style="margin-top:6px; font-size:0.78rem; opacity:0.62;">PDF v1 仅支持可提取文本的论文/文档，不支持扫描件 OCR</div>
             </div>
             <div class="input-group">
                 <label>分组（可选）</label>
@@ -2820,6 +3443,13 @@
                             <polyline points="12 6 12 12 16 14"></polyline>
                         </svg></span>
                     <span style="font-size:0.7rem;">进度</span>
+                </div>
+                <div class="reader-tool-btn" onclick="recognizeCurrentPdfPageVision()" title="识别当前页">
+                    <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24">
+                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg></span>
+                    <span style="font-size:0.7rem;">识别页图</span>
                 </div>
                 <div class="reader-tool-btn" onclick="hardSnapReaderToPage()" title="对齐">
                     <span><svg class="icon" style="width:22px;height:22px;" viewBox="0 0 24 24">
@@ -3245,10 +3875,10 @@
         <!-- 聊天头部 -->
         <div
             style="background:var(--card-bg); padding:15px; display:flex; align-items:center; gap:15px; border-bottom:1px solid rgba(0,0,0,0.1); box-shadow:var(--shadow);">
-            <span style="cursor:pointer;" onclick="closeCharacterChat()"><svg class="icon"
+            <span id="chat-back-btn" style="cursor:pointer;" onclick="closeCharacterChat()"><svg class="icon"
                     style="width:24px;height:24px;" viewBox="0 0 24 24">
-                    <line x1="19" y1="12" x2="5" y2="12"></line>
-                    <polyline points="12 19 5 12 12 5"></polyline>
+                    <line x1="4" y1="8" x2="16" y2="8"></line>
+                    <line x1="4" y1="16" x2="13" y2="16"></line>
                 </svg></span>
             <img id="chat-avatar" src=""
                 style="width:40px; height:40px; border-radius:50%; object-fit:cover; border:2px solid var(--accent);">
@@ -3260,52 +3890,62 @@
                     </div>
                 </div>
             </div>
-            <span id="chat-session-btn" class="tool-icon" style="margin-right:15px;"
+            <span id="chat-session-btn" class="tool-icon" style="margin-right:12px;"
                 onclick="openCharacterSessionSidebar()" title="会话窗口">
                 <svg class="icon" viewBox="0 0 24 24">
-                    <rect x="2" y="3" width="20" height="18" rx="2" />
-                    <line x1="9" y1="3" x2="9" y2="21" />
+                    <path d="M12 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3v-6"></path>
+                    <path d="M16 4l4 4"></path>
+                    <path d="M9 15l1.2-3.8L17 4.4a1.4 1.4 0 0 1 2 2L12.2 13.2z"></path>
                 </svg>
             </span>
-            <span class="tool-icon" style="margin-right:15px;" onclick="openMemoryLibrary()" title="长期记忆库">
+            <!-- ⋮ Toggle 按钮 -->
+            <span id="chat-tools-toggle-btn" class="tool-icon" onclick="toggleChatExtraTools()" title="更多工具">
                 <svg class="icon" viewBox="0 0 24 24">
-                    <path
-                        d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z">
-                    </path>
-                    <path
-                        d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z">
-                    </path>
+                    <circle cx="12" cy="5" r="1.5"></circle>
+                    <circle cx="12" cy="12" r="1.5"></circle>
+                    <circle cx="12" cy="19" r="1.5"></circle>
                 </svg>
             </span>
-            <span class="tool-icon" style="margin-right:15px;" onclick="toggleHistoryCollapse()" title="折叠/展开历史"
-                id="chat-collapse-btn">
-                <svg class="icon" viewBox="0 0 24 24">
-                    <path d="M8 6h13"></path>
-                    <path d="M8 12h13"></path>
-                    <path d="M8 18h13"></path>
-                    <path d="M3 6h.01"></path>
-                    <path d="M3 12h.01"></path>
-                    <path d="M3 18h.01"></path>
-                </svg>
-            </span>
-            <span class="tool-icon" id="reading-spoiler-toggle"
-                style="margin-right:15px; display:none; color:var(--daily);" onclick="toggleReadingSpoilerMode()"
-                title="阅读状态：初读模式">
-                <svg class="icon" viewBox="0 0 24 24">
-                    <path
-                        d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24">
-                    </path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                </svg>
-            </span>
-            <span class="tool-icon" onclick="openCharacterSettingsFromChat()" title="设置">
-                <svg class="icon" viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="3"></circle>
-                    <path
-                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
-                    </path>
-                </svg>
-            </span>
+            <!-- 可折叠的额外工具按钮 -->
+            <div id="chat-extra-tools" class="chat-extra-tools">
+                <span class="tool-icon" onclick="openMemoryLibrary()" title="长期记忆库">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <path
+                            d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z">
+                        </path>
+                        <path
+                            d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z">
+                        </path>
+                    </svg>
+                </span>
+                <span class="tool-icon" onclick="toggleHistoryCollapse()" title="折叠/展开历史" id="chat-collapse-btn">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <path d="M8 6h13"></path>
+                        <path d="M8 12h13"></path>
+                        <path d="M8 18h13"></path>
+                        <path d="M3 6h.01"></path>
+                        <path d="M3 12h.01"></path>
+                        <path d="M3 18h.01"></path>
+                    </svg>
+                </span>
+                <span class="tool-icon" id="reading-spoiler-toggle" style="display:none; color:var(--daily);"
+                    onclick="toggleReadingSpoilerMode()" title="阅读状态：初读模式">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <path
+                            d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24">
+                        </path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                    </svg>
+                </span>
+                <span class="tool-icon" onclick="openCharacterSettingsFromChat()" title="设置">
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
+                </span>
+            </div>
         </div>
 
         <!-- 聊天消息区域 -->
@@ -3357,9 +3997,9 @@
                 <textarea id="character-chat-input" placeholder="输入消息... (回车换行)" rows="1"
                     onfocus="collapseTacticalToolbar('character')"></textarea>
                 <button id="character-send-btn" class="send-btn" onclick="sendCharacterMessage()">
-                    <svg class="icon" style="width:20px;height:20px;stroke:var(--bg);" viewBox="0 0 24 24">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    <svg class="icon" style="width:18px;height:18px;stroke:var(--bg);" viewBox="0 0 24 24" fill="none">
+                        <line x1="12" y1="19" x2="12" y2="5"></line>
+                        <polyline points="6 11 12 5 18 11"></polyline>
                     </svg>
                 </button>
             </div>
@@ -3367,6 +4007,20 @@
             <!-- 3. 战术面板 (Bottom Sheet) -->
             <div id="character-tactical-toolbar" class="tactical-panel">
                 <div class="tool-grid">
+                    <div class="tool-item ai-reply-tool" onclick="triggerCharacterAIResponse()" style="display:none;">
+                        <div class="tool-icon-box" style="border: 1px solid var(--accent); color: var(--accent);">
+                            <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                                <line x1="12" y1="2" x2="12" y2="6" stroke-width="0.8"></line>
+                                <line x1="12" y1="18" x2="12" y2="22" stroke-width="0.8"></line>
+                                <line x1="2" y1="12" x2="6" y2="12" stroke-width="0.8"></line>
+                                <line x1="18" y1="12" x2="22" y2="12" stroke-width="0.8"></line>
+                                <circle cx="19" cy="5" r="1" fill="currentColor" stroke="none"></circle>
+                                <circle cx="5" cy="19" r="0.7" fill="currentColor" stroke="none"></circle>
+                            </svg>
+                        </div>
+                        <span class="tool-label" style="color:var(--accent); font-weight:bold;">AI 回复</span>
+                    </div>
                     <div class="tool-item" onclick="toolSendBingo()">
                         <div class="tool-icon-box"><svg class="tool-svg" viewBox="0 0 24 24">
                                 <path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z" />
@@ -3450,58 +4104,125 @@
             <button id="character-session-sidebar-create" class="btn" style="width:100%; margin:0;">+ 新建会话</button>
         </div>
     </div>
-    
+
     <!-- 记忆索引管理面板 -->
     <div id="panel-memory-index" class="sidebar-panel modal">
-        <div class="sheet" style="max-width:600px;">
-            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <span class="back-btn" onclick="closePanelBack()">‹</span>
-                <h3 style="margin:0;">记忆索引</h3>
-                <span style="width:30px;"></span>
+        <div class="sheet mi-panel-wrapper">
+        <!-- Header -->
+        <div class="mi-header">
+            <h3>记忆索引</h3>
+            <button class="mi-back-btn" onclick="closePanelBack()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="square" stroke-linejoin="miter">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+
+        <div class="mi-body">
+            <!-- Stats -->
+            <div id="mi-stats" class="mi-stats-grid">
+                <div class="mi-stat-card">
+                    <span class="mi-stat-label">原子总量</span>
+                    <span id="mi-total-count" class="mi-stat-value">--</span>
+                </div>
+                <div class="mi-stat-card">
+                    <span class="mi-stat-label">事件组</span>
+                    <span id="mi-group-count" class="mi-stat-value">--</span>
+                </div>
+                <div class="mi-stat-card">
+                    <span class="mi-stat-label">空间节点</span>
+                    <span id="mi-space-count" class="mi-stat-value">--</span>
+                </div>
+                <div class="mi-stat-card">
+                    <span class="mi-stat-label">记忆锚点</span>
+                    <span id="mi-anchor-count" class="mi-stat-value">--</span>
+                </div>
             </div>
 
-            <!-- Stats bar -->
-            <div id="mi-stats" style="display:flex; gap:12px; margin-bottom:12px; font-size:0.8rem; color:var(--text-secondary);">
-                <span id="mi-total-count">总计: --</span>
-                <span id="mi-avg-imp">平均权重: --</span>
-            </div>
-
-            <!-- Character selector -->
-            <div style="display:flex; gap:8px; margin-bottom:12px;">
-                <select id="mi-character-select" onchange="loadMemoryIndex()" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);">
+            <!-- Controls (Select & Search) -->
+            <div class="mi-controls-row">
+                <select id="mi-character-select" class="mi-select" onchange="miCurrentPage=1;loadMemoryIndex()">
                     <option value="">全部角色</option>
                 </select>
-                <button class="btn btn-sec" onclick="loadMemoryIndex()" style="padding:8px 12px; font-size:0.85rem;">刷新</button>
+
+                <div class="mi-search-container">
+                    <svg class="mi-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="mi-search" class="mi-input" placeholder="输入检索指令或关键词..."
+                        onkeydown="if(event.key==='Enter'){miCurrentPage=1;loadMemoryIndex();}">
+                </div>
+
+                <button class="mi-btn secondary" onclick="miCurrentPage=1;loadMemoryIndex()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.59-9.21l1.25.92"></path>
+                    </svg>
+                    刷新
+                </button>
             </div>
 
-            <!-- Search -->
-            <div style="display:flex; gap:8px; margin-bottom:12px;">
-                <input type="text" id="mi-search" placeholder="搜索记忆内容..." style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--card-bg); color:var(--text);" onkeydown="if(event.key==='Enter')loadMemoryIndex()">
-                <button class="btn btn-sec" onclick="loadMemoryIndex()" style="padding:8px 12px; font-size:0.85rem;">搜索</button>
+            <!-- Tabs -->
+            <div class="mi-tabs" id="mi-view-tabs">
+                <div class="mi-tab active" data-view="level" onclick="miSwitchView('level')">
+                    <span class="tech-dot"></span>分级拓扑
+                </div>
+                <div class="mi-tab" data-view="space" onclick="miSwitchView('space')">
+                    <span class="tech-dot"></span>空间网格
+                </div>
+                <div class="mi-tab" data-view="atom" onclick="miSwitchView('atom')">
+                    <span class="tech-dot"></span>原子阵列
+                </div>
             </div>
 
-            <!-- Batch actions -->
-            <div id="mi-batch-bar" style="display:none; margin-bottom:10px; padding:8px; border-radius:8px; background:var(--card-bg); display:flex; align-items:center; gap:8px;">
-                <label style="font-size:0.8rem; margin:0; display:flex; align-items:center; gap:4px;">
-                    <input type="checkbox" id="mi-select-all" onchange="miToggleSelectAll()"> 全选
-                </label>
-                <span id="mi-selected-count" style="font-size:0.8rem; color:var(--text-secondary);">已选 0 条</span>
-                <button class="btn" style="margin-left:auto; padding:4px 10px; font-size:0.8rem; background:var(--danger, #e74c3c);" onclick="miDeleteSelected()">删除选中</button>
+            <!-- Batch Action Bar -->
+            <div id="mi-batch-bar" class="mi-batch-bar" style="display: none;">
+                <div class="mi-batch-info">
+                    <input type="checkbox" id="mi-select-all" class="mi-checkbox" onchange="miToggleSelectAll()">
+                    <label for="mi-select-all" style="cursor: pointer;">全选</label>
+                    <span id="mi-selected-count" style="margin-left:12px; color: var(--accent);">已选 0 条</span>
+                </div>
+                <button class="mi-btn danger" onclick="miDeleteSelected()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14H7V6m3 0V4h4v2"></path>
+                    </svg>
+                    删除选中
+                </button>
             </div>
 
-            <!-- Memory list -->
-            <div id="mi-list" style="max-height:55vh; overflow-y:auto; margin-bottom:12px;"></div>
+            <!-- List Area -->
+            <div id="mi-list" class="mi-list-container">
+            </div>
 
             <!-- Pagination -->
-            <div id="mi-pagination" style="display:flex; justify-content:center; align-items:center; gap:10px; font-size:0.85rem;">
-                <button class="btn btn-sec" id="mi-prev" onclick="miPrevPage()" style="padding:4px 12px;" disabled>上一页</button>
-                <span id="mi-page-info">1 / 1</span>
-                <button class="btn btn-sec" id="mi-next" onclick="miNextPage()" style="padding:4px 12px;" disabled>下一页</button>
+            <div id="mi-pagination" class="mi-pagination">
+                <button class="mi-btn secondary" id="mi-prev" onclick="miPrevPage()" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                    上一页
+                </button>
+                <div class="mi-page-info">
+                    第 <span id="mi-page-info-text">1 / 1</span> 页
+                </div>
+                <button class="mi-btn secondary" id="mi-next" onclick="miNextPage()" disabled>
+                    下一页
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
             </div>
+
+        </div>
         </div>
     </div>
     <script src="./vendor/jszip.min.js"></script>
     <script src="./vendor/epub.min.js"></script>
+    <script src="prompt-cache.js"></script>
     <script src="script.js"></script>
 </body>
 

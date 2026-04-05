@@ -1,120 +1,72 @@
-# tara-bingo-lifeos
+# AZOTH
 
-TARA-s-LifeOS-Chronos-BinGO-Date
+AZOTH 是一个以角色包、记忆系统、任务调度和多 surface 交互为核心的云端 PWA 个人操作系统。
 
+产品名称现在统一使用 `AZOTH`，但仓库目录、部署路径、PM2 进程名以及部分技术标识仍保留 `lifeos` 兼容别名。
 
+## 当前状态
 
-2026/2/12以下是修改总结：
+截至 `2026-04-02`，项目当前口径如下：
 
+- `Phase 6 A-F` 已完成并进入稳定基线
+- `角色包系统 v2` 已封板
+- `proposal -> approve -> task -> Discord delivery` 已打通并完成真实 live smoke
+- `v3.0 Prompt Runtime` 已完成 `A/B/C/D` 四刀：
+  - `A` shadow compile
+  - `B` shadow context hydration
+  - `C` parity drilldown / summary
+  - `D` first live cut behind feature flag
+- `LIFEOS_V3_PROMPT_LIVE` 当前默认保持 `off`
 
+## 现在仓库里最重要的能力
 
-1\. 自动备份机制（最重要）
+- 角色包 loader / resolver / runtime summary
+- hooks / quota / proposal / approve / task 执行链
+- proposal inbox / proposal notifications / risk routing
+- native Discord delivery
+- prompt runtime compiler / stable prefix cache / prompt preview
+- LifeOS web chat 的 shadow compile 与 guarded live cut
 
-每 5 分钟自动保存一次快照到 localStorage
+## 当前 rollout 口径
 
-页面关闭/切后台时自动触发保存
+- `v2` 已视为完成，不再往里塞 `v3` 内容
+- `v3.0` 仍是唯一主线，先稳住 Prompt Runtime
+- `v3.1 Capability Runtime` 还没开工，不提前推进
+- Discord 主回复链暂未做 v3 live cut，当前只对 `LifeOS web chat` 预留 live path
 
-主数据损坏时自动提示从备份恢复
+## 当前运行注意
 
-超过 7 天未手动导出时弹出 toast 提醒
+- Claude 的 `LifeOS` 绑定当前临时跑在 `gpt-4o-2024-11-20`
+- 当前工作 API base 为 `https://www.msuicode.com/v1`
+- 工作 key 只放在 PM2 env，不写入仓库文件
+- Discord 侧 Claude 绑定没有跟着一起切
+- `quota.json`、hooks/policies 这类变更目前仍需要服务重启生效
 
-每次导出都会记录时间戳
+## 关键文档
 
-2\. innerHTML += 性能修复（24 处）
+- [计划与架构/codex_memory.md](计划与架构/codex_memory.md)
+- [计划与架构/CLOUD_PROGRESS.md](计划与架构/CLOUD_PROGRESS.md)
+- [计划与架构/角色包系统_v2_设计.md](计划与架构/角色包系统_v2_设计.md)
+- [计划与架构/角色包系统_v3_设计计划.md](计划与架构/角色包系统_v3_设计计划.md)
+- [计划与架构/角色包系统_v3_基因移植补充.md](计划与架构/角色包系统_v3_基因移植补充.md)
+- [计划与架构/AZOTH-Discord多端房间构架.md](计划与架构/AZOTH-Discord多端房间构架.md)
 
-所有循环内的 innerHTML += 改为先拼好字符串再一次性 innerHTML =
+## 代码锚点
 
-包括热力图、归档列表、Bingo 选择、商店、日历等所有位置
+- [server/routes/ai.js](server/routes/ai.js)
+- [server/services/prompt-runtime.js](server/services/prompt-runtime.js)
+- [server/services/task-dispatcher.js](server/services/task-dispatcher.js)
+- [server/services/proposal-execution.js](server/services/proposal-execution.js)
+- [server/discord-bridge.js](server/discord-bridge.js)
 
-消除了重复 DOM 重排
+## 推荐阅读顺序
 
-3\. Chart.js 图表复用
+1. 先看 `CLOUD_PROGRESS.md` 了解真实上线时间线
+2. 再看 `codex_memory.md` 抓当前工作口径
+3. 然后看 `角色包系统_v3_设计计划.md` 理解 v3 的目标边界
+4. 最后回到 `ai.js / prompt-runtime.js / task-dispatcher.js` 看实际主链
 
-折线图和饼图改为 chart.update() 复用已有实例
+## 备注
 
-只在首次创建时 new Chart()，后续只更新数据
-
-4\. Escape 键关闭模态框
-
-全局监听 Escape 键
-
-自动关闭最上层的 active 模态框
-
-没有模态框时关闭侧边栏
-
-5\. JSON 导入增强验证
-
-文件大小上限检查（50MB）
-
-基本类型和必需字段验证
-
-导入前二次确认（显示文件大小和导入模式）
-
-导入前自动做一次备份快照
-
-6\. Loading 状态反馈
-
-导出数据时显示 toast 提示
-
-导入数据时显示 toast 提示
-
-这些都是渐进式的改动，不会破坏现有功能。 
-
-
-
-\# 语义世界书已实现
-
-三灯模式并存
-
-灯色
-
-模式
-
-触发方式
-
-🔵 蓝灯
-
-常驻
-
-始终注入（不变）
-
-🟢 绿灯
-
-关键词
-
-.includes() 匹配（不变）
-
-🟣 紫灯
-
-语义
-
-余弦相似度匹配（新增）
-
-改动详情
-
-script.js — 3 处新增/修改：
-
-• semanticEmbeddingService（line 164）— 懒加载单例，通过 dynamic import 加载 Transformers.js + Xenova/bge-small-zh-v1.5 中文模型
-
-• saveWorldBookEntry()（line 5184）— 紫灯模式保存时自动生成 512 维向量，内容不变时复用缓存
-
-• buildCharacterSystemPrompt()（line 2975）— 对话上下文只算一次向量，然后对每个紫灯条目做余弦相似度比较
-
-index.html — 2 处新增：
-
-• 条目编辑模态框添加紫灯「语义」按钮（line 1328）
-
-• 角色设置面板添加「语义匹配阈值」滑块 0.3~0.9（line 1058）
-
-使用方式
-
-1\. 打开一个世界书条目，点击紫色的「语义」按钮
-
-2\. 填写内容后保存 → 首次会下载 ~24MB 模型（之后浏览器缓存）
-
-3\. 在角色设置中调整「语义匹配阈值」（默认 0.55）
-
-4\. 聊天时，即使你说的词和条目里的词完全不同，只要语义相关就能触发
-
-例如：条目写了「锈湖 — 一座被红色铁锈覆盖的废弃湖边旅馆」，你在聊天中提到「那栋红色的房子」→ 语义相似度会很高，条目自动激活注入。
-
+- 这个 README 现在主要承担“仓库入口态势板”的作用，不再记录所有历史小改动
+- 较早期的零散更新说明请直接看 Git 历史或架构文档时间线
